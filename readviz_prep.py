@@ -30,14 +30,21 @@ def get_expr_for_het_hom_hemi_take(mt, var_type: str):
 
 def get_expr_for_het(mt, gq_threshold, dp_threshold):
     return (
-        mt.GT.is_het() & (mt.GQ >= gq_threshold) & (mt.DP >= dp_threshold) & hl.is_defined(mt.meta.cram)
+        mt.GT.is_het()
+        & (mt.GQ >= gq_threshold)
+        & (mt.DP >= dp_threshold)
+        & hl.is_defined(mt.meta.cram)
     )
 
 
 def get_expr_for_hom(mt, gq_threshold, dp_threshold):
     return (
-        mt.GT.is_diploid() & mt.GT.is_hom_var() & (mt.GQ >= gq_threshold) & (mt.DP >= dp_threshold)  & hl.is_defined(mt.meta.cram)
-    )  # & hl.is_defined(mt.meta.cram_path)
+        mt.GT.is_diploid()
+        & mt.GT.is_hom_var()
+        & (mt.GQ >= gq_threshold)
+        & (mt.DP >= dp_threshold)
+        & hl.is_defined(mt.meta.cram)
+    )
 
 
 def get_expr_for_hemi(mt, gq_threshold, dp_threshold):
@@ -55,8 +62,8 @@ def main(args):
 
     hl.init(log="/readviz_prep")
     meta_ht = hl.read_table(args.meta_ht_path)
-    mt = hl.read_matrix_table(args.variant_mt_path).key_rows_by('locus', 'alleles')
-    crams = hl.import_table(args.cram_path).key_by('s')
+    mt = hl.read_matrix_table(args.variant_mt_path).key_rows_by("locus", "alleles")
+    crams = hl.import_table(args.cram_paths).key_by("s")
 
     dp_threshold = args.dp_threshold
     gq_threshold = args.gq_threshold
@@ -70,7 +77,7 @@ def main(args):
             release=meta_join.release,
             sample_filters=meta_join.sample_filters,
             cram=crams[mt.s].final_cram_path,
-            crai=crams[mt.s].final_crai_path
+            crai=crams[mt.s].final_crai_path,
         )
     )
     mt = mt.filter_cols(mt.meta.release)
@@ -80,14 +87,11 @@ def main(args):
 
     mt = mt.annotate_entries(
         GT=adjusted_sex_ploidy_expr(mt.locus, mt.GT, mt.meta.sex),
-        adj=get_adj_expr(mt.GT, mt.GQ, mt.DP, mt.AD)
+        adj=get_adj_expr(mt.GT, mt.GQ, mt.DP, mt.AD),
     )
 
     logger.info("Selecting only entry fields needed for densify and output ...")
     mt = mt.select_entries("GT", "GQ", "DP", "AD", "END", "adj")
-
-    if args.test:
-        mt = mt.repartition(20)
 
     mt = hl.experimental.densify(mt)
 
@@ -100,11 +104,15 @@ def main(args):
     mt = mt.annotate_rows(
         samples_w_het_var=hl.agg.filter(
             get_expr_for_het(mt, gq_threshold, dp_threshold),
-            hl.agg.take(get_expr_for_het_hom_hemi_take(mt, "het"), num_samples, ordering=-mt.GQ),
+            hl.agg.take(
+                get_expr_for_het_hom_hemi_take(mt, "het"), num_samples, ordering=-mt.GQ,
+            ),
         ),
         samples_w_hom_var=hl.agg.filter(
             get_expr_for_hom(mt, gq_threshold, dp_threshold),
-            hl.agg.take(get_expr_for_het_hom_hemi_take(mt, "hom"), num_samples, ordering=-mt.GQ),
+            hl.agg.take(
+                get_expr_for_het_hom_hemi_take(mt, "hom"), num_samples, ordering=-mt.GQ
+            ),
         ),
         samples_w_hemi_var=hl.agg.filter(
             get_expr_for_hemi(mt, gq_threshold, dp_threshold),
@@ -113,6 +121,7 @@ def main(args):
             ),
         ),
     )
+
     ht = mt.rows()
     ht = ht.select(
         samples=ht.samples_w_het_var.extend(
@@ -125,15 +134,46 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--test", help="Test on chrX", action="store_true")
-    parser.add_argument("--slack-channel", help="Slack channel to post results and notifications to.")
-    parser.add_argument("--overwrite", help="Overwrite if object already exists", action="store_true")
-    parser.add_argument("--dp-threshold", type=int, help="Lower depth threshold for sample list")
-    parser.add_argument("--gq-threshold", type=int,  help="Lower genotype quality threshold for sample list")
-    parser.add_argument("--num-samples", type=int, help="Number of samples to take from each genotype category at each site")
-    parser.add_argument("--cram-path", help="Path to file containing sample, cram, and crai information with headers: s, final_cram_path, final_crai_path")
-    parser.add_argument("--variant-mt-path", help="Path to sparse variant matrix table containing variants")
-    parser.add_argument("--meta-ht-path", help="Path to sample metadata hail table")
-    parser.add_argument("--output-ht-path", help="Path for output hail table")
+    parser.add_argument(
+        "--slack-channel", help="Slack channel to post results and notifications to."
+    )
+    parser.add_argument(
+        "--overwrite", help="Overwrite if object already exists", action="store_true"
+    )
+    parser.add_argument(
+        "--dp-threshold",
+        type=int,
+        help="Lower depth threshold for sample list",
+        default=10,
+    )
+    parser.add_argument(
+        "--gq-threshold",
+        type=int,
+        help="Lower genotype quality threshold for sample list",
+        default=20,
+    )
+    parser.add_argument(
+        "--num-samples",
+        type=int,
+        help="Number of samples to take from each genotype category at each site",
+        default=10,
+    )
+    parser.add_argument(
+        "--cram-paths",
+        help="Path to file containing sample, cram, and crai information with headers: s, final_cram_path, final_crai_path",
+        required=True,
+    )
+    parser.add_argument(
+        "--variant-mt-path",
+        help="Path to sparse variant matrix table containing variants",
+        required=True,
+    )
+    parser.add_argument(
+        "--meta-ht-path", help="Path to sample metadata hail table", required=True
+    )
+    parser.add_argument(
+        "--output-ht-path", help="Path for output hail table", required=True
+    )
     args = parser.parse_args()
 
     if args.slack_channel:
