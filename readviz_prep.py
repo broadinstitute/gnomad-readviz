@@ -3,7 +3,8 @@ import logging
 import hail as hl
 import hail.expr.aggregators as agg
 from gnomad_hail.utils.slack import try_slack
-from gnomad_hail.utils.gnomad_functions import get_adj_expr, adjusted_sex_ploidy_expr
+from gnomad_hail.utils.gnomad_functions import adjusted_sex_ploidy_expr
+from gnomad_qc.v3.resources import get_full_mt, meta_ht_path
 
 logging.basicConfig(
     level=logging.INFO,
@@ -14,103 +15,98 @@ logger = logging.getLogger("Readviz_prep")
 logger.setLevel(logging.INFO)
 
 
-def get_expr_for_het_hom_hemi_take(mt, var_type: str):
-    return hl.struct(
-        S=mt.s,
-        GQ=mt.GQ,
-        het_or_hom_or_hemi=var_type,
+def het_hom_hemi_take_expr(mt, var_type: str):
+    return hl.struct(S=mt.s, GQ=mt.GQ, het_or_hom_or_hemi=var_type,)
+
+
+def het_expr(mt):
+    return mt.GT.is_het()
+
+
+def hom_expr(mt):
+    return mt.GT.is_diploid() & mt.GT.is_hom_var()
+
+
+def hemi_expr(mt):
+    return hl.or_missing(
+        mt.locus.in_x_nonpar() | mt.locus.in_y_nonpar(),
+        mt.GT.is_haploid() & (mt.meta.sex == "male") & (mt.GT[0] == 1),
     )
 
 
-def get_expr_for_het(mt, gq_threshold, dp_threshold):
-    return (
-        mt.GT.is_het()
-        & (mt.GQ >= gq_threshold)
-        & (mt.DP >= dp_threshold)
-        & hl.is_defined(mt.meta.cram)
-    )
-
-
-def get_expr_for_hom(mt, gq_threshold, dp_threshold):
-    return (
-        mt.GT.is_diploid()
-        & mt.GT.is_hom_var()
-        & (mt.GQ >= gq_threshold)
-        & (mt.DP >= dp_threshold)
-        & hl.is_defined(mt.meta.cram)
-    )
-
-
-def get_expr_for_hemi(mt, gq_threshold, dp_threshold):
-    return (
-        mt.GT.is_haploid()
-        & (mt.meta.sex == "male")
-        & (mt.GT[0] == 1)
-        & (mt.GQ >= gq_threshold)
-        & (mt.DP >= dp_threshold)
-        & hl.is_defined(mt.meta.cram)
+def dp_threshold_expr(mt, dp_threshold):
+    return hl.if_else(
+        (mt.meta.sex == "male") & (mt.locus.in_x_nonpar() | mt.locus.in_y_nonpar()),
+        dp_threshold / 2,
+        dp_threshold,
     )
 
 
 def main(args):
 
-    hl.init(log="/readviz_prep")
-    meta_ht = hl.read_table(args.meta_ht_path)
-    mt = hl.read_matrix_table(args.variant_mt_path).key_rows_by("locus", "alleles")
+    hl.init(log="/readviz_prep", default_reference="GRCh38")
+    meta_ht = hl.read_table(meta_ht_path)
+    mt = get_full_mt(split=False, key_by_locus_and_alleles=True)
     crams = hl.import_table(args.cram_paths).key_by("s")
 
     dp_threshold = args.dp_threshold
     gq_threshold = args.gq_threshold
     num_samples = args.num_samples
 
+    if args.test:
+        logger.info("Filtering to chrX PAR1 boundary: chrX:2781477-2781900")
+        mt = hl.filter_intervals(mt, [hl.parse_locus_interval("chrX:2781477-2781900")])
+
     meta_join = meta_ht[mt.s]
     mt = mt.annotate_cols(
         meta=hl.struct(
             sex=meta_join.sex,
             release=meta_join.release,
-            sample_filters=meta_join.sample_filters,
             cram=crams[mt.s].final_cram_path,
             crai=crams[mt.s].final_crai_path,
         )
     )
-    mt = mt.filter_cols(mt.meta.release)
+    logger.info("Filtering to releasable samples with a defined cram path")
+    mt = mt.filter_cols(mt.meta.release & hl.is_defined(mt.meta.cram))
     mt = hl.experimental.sparse_split_multi(mt, filter_changed_loci=True)
 
-    logger.info("Annotating genotypes with adj...")
-
+    logger.info("Adjusting samples' sex ploidy")
     mt = mt.annotate_entries(
-        GT=adjusted_sex_ploidy_expr(mt.locus, mt.GT, mt.meta.sex),
-        adj=get_adj_expr(mt.GT, mt.GQ, mt.DP, mt.AD),
+        GT=adjusted_sex_ploidy_expr(
+            mt.locus,
+            mt.GT,
+            mt.meta.sex,
+            xy_karyotype_str="male",
+            xx_karyotype_str="female",
+        )
     )
+    mt = mt.select_entries("GT", "GQ", "DP")
 
-    logger.info("Selecting only entry fields needed for densify and output ...")
-    mt = mt.select_entries("GT", "GQ", "DP", "AD", "END", "adj")
-
-    mt = hl.experimental.densify(mt)
-
+    logger.info("Filtering to entries meeting GQ and DP thresholds")
+    mt = mt.filter_entries(
+        (mt.GQ >= gq_threshold) & (mt.DP >= dp_threshold_expr(mt, dp_threshold))
+    )
     mt = mt.filter_rows(hl.agg.any(mt.GT.is_non_ref()))
     mt = mt.filter_rows(hl.len(mt.alleles) > 1)
 
-    logger.info(
-        f"Taking up to {num_samples} samples per variant where samples are het, hom_var, or hemi"
-    )
+    logger.info(f"Taking up to {num_samples} samples per site where samples are het, hom_var, or hemi")
     mt = mt.annotate_rows(
         samples_w_het_var=hl.agg.filter(
-            get_expr_for_het(mt, gq_threshold, dp_threshold),
+            het_expr(mt),
             hl.agg.take(
-                get_expr_for_het_hom_hemi_take(mt, "het"), num_samples, ordering=-mt.GQ,
+                het_hom_hemi_take_expr(mt, "het"), num_samples, ordering=-mt.GQ,
             ),
         ),
         samples_w_hom_var=hl.agg.filter(
-            get_expr_for_hom(mt, gq_threshold, dp_threshold),
+            hom_expr(mt),
             hl.agg.take(
-                get_expr_for_het_hom_hemi_take(mt, "hom"), num_samples, ordering=-mt.GQ
+                het_hom_hemi_take_expr(mt, "hom"), num_samples, ordering=-mt.GQ
             ),
         ),
         samples_w_hemi_var=hl.agg.filter(
-            get_expr_for_hemi(mt, gq_threshold, dp_threshold),
+            hemi_expr(mt),
             hl.agg.take(
-                get_expr_for_het_hom_hemi_take(mt, "hemi"), num_samples, ordering=-mt.GQ
+                het_hom_hemi_take_expr(mt, "hemi"), num_samples, ordering=-mt.GQ
             ),
         ),
     )
@@ -155,14 +151,6 @@ if __name__ == "__main__":
         "--cram-paths",
         help="Path to file containing sample, cram, and crai information with headers: s, final_cram_path, final_crai_path",
         required=True,
-    )
-    parser.add_argument(
-        "--variant-mt-path",
-        help="Path to sparse variant matrix table containing variants",
-        required=True,
-    )
-    parser.add_argument(
-        "--meta-ht-path", help="Path to sample metadata hail table", required=True
     )
     parser.add_argument(
         "--output-ht-path", help="Path for output hail table", required=True
