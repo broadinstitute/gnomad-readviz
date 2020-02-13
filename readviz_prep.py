@@ -17,13 +17,7 @@ logger.setLevel(logging.INFO)
 def get_expr_for_het_hom_hemi_take(mt, var_type: str):
     return hl.struct(
         S=mt.s,
-        sex=mt.meta.sex,
-        cram=mt.meta.cram,
-        crai=mt.meta.crai,
-        GT=mt.GT,
         GQ=mt.GQ,
-        DP=mt.DP,
-        AD=mt.AD,
         het_or_hom_or_hemi=var_type,
     )
 
@@ -72,7 +66,6 @@ def main(args):
     meta_join = meta_ht[mt.s]
     mt = mt.annotate_cols(
         meta=hl.struct(
-            project_id=meta_join.project_id,
             sex=meta_join.sex,
             release=meta_join.release,
             sample_filters=meta_join.sample_filters,
