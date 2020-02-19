@@ -15,8 +15,8 @@ logger = logging.getLogger("Readviz_prep")
 logger.setLevel(logging.INFO)
 
 
-def het_hom_hemi_take_expr(mt, var_type: str):
-    return hl.struct(S=mt.s, GQ=mt.GQ, het_or_hom_or_hemi=var_type,)
+def het_hom_hemi_take_expr(mt):
+    return hl.struct(S=mt.s, GQ=mt.GQ)
 
 
 def het_expr(mt):
@@ -84,39 +84,33 @@ def main(args):
 
     logger.info("Filtering to entries meeting GQ and DP thresholds")
     mt = mt.filter_entries(
-        (mt.GQ >= gq_threshold) & (mt.DP >= dp_threshold_expr(mt, dp_threshold))
+        (mt.GQ >= gq_threshold)
+        & (mt.DP >= dp_threshold_expr(mt, dp_threshold))
+        & (mt.GT.is_non_ref())
     )
     mt = mt.filter_rows(hl.agg.any(mt.GT.is_non_ref()))
     mt = mt.filter_rows(hl.len(mt.alleles) > 1)
 
-    logger.info(f"Taking up to {num_samples} samples per site where samples are het, hom_var, or hemi")
+    logger.info(
+        f"Taking up to {num_samples} samples per site where samples are het, hom_var, or hemi"
+    )
     mt = mt.annotate_rows(
         samples_w_het_var=hl.agg.filter(
             het_expr(mt),
-            hl.agg.take(
-                het_hom_hemi_take_expr(mt, "het"), num_samples, ordering=-mt.GQ,
-            ),
+            hl.agg.take(het_hom_hemi_take_expr(mt), num_samples, ordering=-mt.GQ),
         ),
         samples_w_hom_var=hl.agg.filter(
             hom_expr(mt),
-            hl.agg.take(
-                het_hom_hemi_take_expr(mt, "hom"), num_samples, ordering=-mt.GQ
-            ),
+            hl.agg.take(het_hom_hemi_take_expr(mt), num_samples, ordering=-mt.GQ),
         ),
         samples_w_hemi_var=hl.agg.filter(
             hemi_expr(mt),
-            hl.agg.take(
-                het_hom_hemi_take_expr(mt, "hemi"), num_samples, ordering=-mt.GQ
-            ),
+            hl.agg.take(het_hom_hemi_take_expr(mt), num_samples, ordering=-mt.GQ),
         ),
     )
 
     ht = mt.rows()
-    ht = ht.select(
-        samples=ht.samples_w_het_var.extend(
-            ht.samples_w_hom_var.extend(ht.samples_w_hemi_var)
-        )
-    )
+    ht = ht.select(ht.samples_w_het_var, ht.samples_w_hom_var, ht.samples_w_hemi_var)
     ht.write(args.output_ht_path, overwrite=args.overwrite)
 
 
