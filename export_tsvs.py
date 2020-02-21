@@ -14,6 +14,7 @@ with open(args.sample_ids_file_path, "rt") as f:
 
 
 ht = hl.read_table("gs://gnomad/readviz/genomes_v3/gnomad_v3_readviz_crams.ht")
+print(ht.describe())
 
 # add het_or_hom_or_hemi field to each struct
 ht = ht.annotate(
@@ -27,22 +28,23 @@ ht = ht.annotate(samples=ht.samples_w_het_var.extend(ht.samples_w_hom_var.extend
 ht = ht.drop(ht.samples_w_het_var, ht.samples_w_hom_var, ht.samples_w_hemi_var)
 
 # explode
-ht = ht.explode(ht.samples)
+ht = ht.explode(ht.samples).key_by()
+ht = ht.transmute(
+    chrom=ht.locus.contig.replace("chr", ""),
+    pos=ht.locus.position,
+    ref=ht.alleles[0],
+    alt=ht.alleles[1],
+    het_or_hom_or_hemi=ht.samples.het_or_hom_or_hemi,
+    GQ=ht.samples.GQ,
+    S=ht.samples.S,    
+)
 
+print(ht.describe())
+
+ht = ht.checkpoint("gs://gnomad/readviz/genomes_v3/gnomad_v3_readviz_crams_exploded.ht", _read_if_exists=True)
 
 # write a .tsv for each sample
 for s in sample_ids:
-    print(f"Processing sample: {s}")
     ht = ht.filter(ht.samples.S==s, keep=True)
-    ht = ht.key_by()
-    ht = ht.transmute(
-        chrom=ht.locus.contig,
-        pos=ht.locus.position,
-        ref=ht.alleles[0],
-        alt=ht.alleles[0],
-        GQ=ht.samples.GQ,
-        het_or_hom_or_hemi=ht.samples.het_or_hom_or_hemi,
-    )
-
     s = s.replace(' ', '__').replace(":", "_")
     ht.export(os.path.join(args.sample_ids_file_path, f"{s}.tsv.bgz"), header=True)
