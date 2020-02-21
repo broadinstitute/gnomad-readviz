@@ -7,20 +7,30 @@ p.add_argument("-o", "--output-bucket-path", help="Path where the .tsvs for each
 p.add_argument("sample_ids_file_path", help="A text file containing one sample id per line")
 args = p.parse_args()
 
+# parse sample ids
 sample_ids = []
-with open(args.sample_ids_file_path, "rt") as f:
-    for line in f:
-        sample_ids.append(line.rstrip("\n"))
+with hl.hadoop_open(args.sample_ids_file_path) if args.sample_ids_file_path.startswith("gs://" ) else open(args.sample_ids_file_path, "rt") as f:
+    for i, line in enumerate(f):
+        sample_id = line.rstrip("\n")
+        sample_ids.append(sample_id)
 
+        if i < 20:
+            print(sample_id)
+        elif i == 20:
+            print("...")
 
+print(f"Parsed {len(sample_ids)} sample ids from {args.sample_ids_file_path}\n")
+
+# read gnomad ht
 ht = hl.read_table("gs://gnomad/readviz/genomes_v3/gnomad_v3_readviz_crams.ht")
-print(ht.describe())
+print("Input schema:")
+ht.describe()
 
 # add het_or_hom_or_hemi field to each struct
 ht = ht.annotate(
     samples_w_het_var=ht.samples_w_het_var.map(lambda x: hl.struct(S=x.S, GQ=x.GQ, het_or_hom_or_hemi=1)),
     samples_w_hom_var=ht.samples_w_hom_var.map(lambda x: hl.struct(S=x.S, GQ=x.GQ, het_or_hom_or_hemi=2)),
-    samples_w_hemi_var=ht.samples_w_hemi_var.map(lambda x: hl.struct(S=x.S, GQ=x.GQ, het_or_hom_or_hemi=3))
+    samples_w_hemi_var=ht.samples_w_hemi_var.map(lambda x: hl.struct(S=x.S, GQ=x.GQ, het_or_hom_or_hemi=3)),
 )
 
 # combine ht.samples_w_het_var, ht.samples_w_hom_var, ht.samples_w_hemi_var into a single ht.samples array
@@ -36,15 +46,16 @@ ht = ht.transmute(
     alt=ht.alleles[1],
     het_or_hom_or_hemi=ht.samples.het_or_hom_or_hemi,
     GQ=ht.samples.GQ,
-    S=ht.samples.S,    
+    S=ht.samples.S,
 )
-
-print(ht.describe())
 
 ht = ht.checkpoint("gs://gnomad/readviz/genomes_v3/gnomad_v3_readviz_crams_exploded.ht", _read_if_exists=True)
 
+print("Output schema:")
+ht.describe()
+
 # write a .tsv for each sample
-for s in sample_ids:
+for s in sorted(sample_ids):
     ht = ht.filter(ht.S==s, keep=True)
-    tsv_filename = s.replace(' ', '__').replace(":", "_") + ".tsv.bgz"
-    ht.export(os.path.join(args.sample_ids_file_path, tsv_filename), header=True)
+    tsv_output_path = os.path.join(args.output_bucket_path, s.replace(' ', '__').replace(":", "_"))  # + ".tsv.bgz"
+    ht.export(tsv_output_path, parallel="separate_header")
