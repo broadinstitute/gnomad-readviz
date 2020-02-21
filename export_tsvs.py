@@ -57,5 +57,7 @@ ht.describe()
 # write a .tsv for each sample
 for s in sorted(sample_ids):
     ht = ht.filter(ht.S==s, keep=True)
-    tsv_output_path = os.path.join(args.output_bucket_path, s.replace(' ', '__').replace(":", "_"))  # + ".tsv.bgz"
-    ht.export(tsv_output_path, parallel="separate_header")
+    ht = ht.drop(ht.S)	 # the sample id will be in the .tsv filename, so this column is redundant
+    tsv_output_path = os.path.join(args.output_bucket_path, f"{s}.tsv.bgz") # .replace(' ', '__').replace(":", "_"))
+    ht.export(tsv_output_path) # , parallel="separate_header")
+
