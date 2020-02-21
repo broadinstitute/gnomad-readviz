@@ -45,6 +45,6 @@ ht = ht.checkpoint("gs://gnomad/readviz/genomes_v3/gnomad_v3_readviz_crams_explo
 
 # write a .tsv for each sample
 for s in sample_ids:
-    ht = ht.filter(ht.samples.S==s, keep=True)
-    s = s.replace(' ', '__').replace(":", "_")
-    ht.export(os.path.join(args.sample_ids_file_path, f"{s}.tsv.bgz"), header=True)
+    ht = ht.filter(ht.S==s, keep=True)
+    tsv_filename = s.replace(' ', '__').replace(":", "_") + ".tsv.bgz"
+    ht.export(os.path.join(args.sample_ids_file_path, tsv_filename), header=True)
