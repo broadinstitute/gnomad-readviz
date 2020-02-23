@@ -5,6 +5,9 @@ import os
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s: %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
 
+GNOMAD_V3_RELEASE_HT = "gs://gnomad-public/release/3.0/ht/genomes/gnomad.genomes.r3.0.sites.ht"
+GNOMAD_V3_READVIZ_CRAMS_HT = "gs://gnomad/readviz/genomes_v3/gnomad_v3_readviz_crams.ht"
+GNOMAD_V3_READVIZ_CRAMS_EXPLODED_HT = "gs://gnomad/readviz/genomes_v3/gnomad_v3_readviz_crams_exploded_with_key.ht"
 
 def parse_args():
 	"""Parse command line args."""
@@ -60,6 +63,16 @@ def read_sample_ids(sample_ids_path, n_sample_ids_to_print = 10):
 	return sample_ids
 
 
+def remove_AC0_variants(ht):
+	"""Removes all variants from ht that are AC=0 in the gnomAD public release"""
+	gnomad_ht = hl.read_table(GNOMAD_V3_RELEASE_HT)
+	gnomad_ht_AC0 = gnomad_ht.filter(gnomad_ht.freq.AC[gnomad_ht.globals.freq_index_dict['adj']] == 0, keep=True)
+
+	ht = ht.anti_join(gnomad_ht_AC0)  # remove AC0 variants
+
+	return ht
+
+
 def explode_table_by_sample(ht):
 	"""Explode variant-level ht by sample."""
 
@@ -75,16 +88,6 @@ def explode_table_by_sample(ht):
 	ht = ht.select(samples=ht.samples_w_het_var.extend(ht.samples_w_hom_var.extend(ht.samples_w_hemi_var)))
 
 	ht = ht.explode(ht.samples)
-	ht = ht.key_by(ht.locus)  # keep locus key to work around bug in naive_coalesce(..) when key is empty (https://github.com/hail-is/hail/issues/8138)
-	ht = ht.transmute(
-		#chrom=ht.locus.contig.replace("chr", ""),
-		#pos=ht.locus.position,
-		ref=ht.alleles[0],
-		alt=ht.alleles[1],
-		het_or_hom_or_hemi=ht.samples.het_or_hom_or_hemi,
-		GQ=ht.samples.GQ,
-		S=ht.samples.S,
-	)
 
 	return ht
 
@@ -99,19 +102,35 @@ def export_per_sample_tsvs(ht, sample_ids, output_bucket_path, n_partitions_per_
 		n_partitions_per_sample (int):
 	"""
 
-	logging.info("Output schema:")
-	ht.describe()
-
-	for s in sorted(sample_ids):
-		per_sample_ht = ht.filter(ht.S==s, keep=True)
-		per_sample_ht = per_sample_ht.drop(per_sample_ht.S)  # drop redundant column. Sample id is in the .tsv filename.
+	for i, sample_id in enumerate(sorted(sample_ids)):
+		per_sample_ht = ht.filter(ht.samples.S == sample_id, keep=True)
 		if n_partitions_per_sample > 1:
-			tsv_output_path = os.path.join(output_bucket_path, s)
 			per_sample_ht = per_sample_ht.naive_coalesce(n_partitions_per_sample)
+
+		# can't remove the key before naive_coalesce for now because of https://github.com/hail-is/hail/issues/8138
+		per_sample_ht = per_sample_ht.key_by()
+
+		per_sample_ht = per_sample_ht.transmute(
+			chrom=per_sample_ht.locus.contig.replace("chr", ""),
+			pos=per_sample_ht.locus.position,
+			ref=per_sample_ht.alleles[0],
+			alt=per_sample_ht.alleles[1],
+			het_or_hom_or_hemi=per_sample_ht.samples.het_or_hom_or_hemi,
+			GQ=per_sample_ht.samples.GQ,
+			S=per_sample_ht.samples.S,
+		)
+		per_sample_ht = per_sample_ht.drop(per_sample_ht.S)  # drop sample id since it's in the .tsv filename
+
+		if i == 0:
+			logging.info("Output schema:")
+			per_sample_ht.describe().describe()
+
+		if n_partitions_per_sample > 1:
+			tsv_output_path = os.path.join(output_bucket_path, sample_id)
 			per_sample_ht.export(tsv_output_path, parallel="separate_header")
 		else:
-			tsv_output_path = os.path.join(output_bucket_path, f"{s}.tsv.bgz")
-			per_sample_ht.export(tsv_output_path, header=True)
+			tsv_output_path = os.path.join(output_bucket_path, f"{sample_id}.tsv.bgz")
+			per_sample_ht.export(tsv_output_path, header=False)
 
 		logging.info(f"Done exporting {tsv_output_path} to {n_partitions_per_sample} file(s)")
 
@@ -121,12 +140,14 @@ def main():
 
 	sample_ids = read_sample_ids(args.sample_ids_path)
 
-	ht = hl.read_table("gs://gnomad/readviz/genomes_v3/gnomad_v3_readviz_crams.ht")
+	ht = hl.read_table(GNOMAD_V3_READVIZ_CRAMS_HT)
+
+	ht = remove_AC0_variants(ht)
 
 	ht = explode_table_by_sample(ht)
 
 	ht = ht.checkpoint(
-		"gs://gnomad/readviz/genomes_v3/gnomad_v3_readviz_crams_exploded_with_key.ht",
+		GNOMAD_V3_READVIZ_CRAMS_EXPLODED_HT,
 		overwrite=args.overwrite_checkpoints,
 		_read_if_exists=not args.overwrite_checkpoints,
 	)
