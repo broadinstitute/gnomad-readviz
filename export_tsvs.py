@@ -123,7 +123,7 @@ def export_per_sample_tsvs(ht, sample_ids, output_bucket_path, n_partitions_per_
 
 		if i == 0:
 			logging.info("Output schema:")
-			per_sample_ht.describe().describe()
+			per_sample_ht.describe()
 
 		if n_partitions_per_sample > 1:
 			tsv_output_path = os.path.join(output_bucket_path, sample_id)
