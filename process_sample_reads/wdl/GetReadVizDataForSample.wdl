@@ -76,7 +76,7 @@ task PrintReadVizIntervals {
 	}
 
 	runtime {
-		docker: "weisburd/gnomad-readviz@sha256:37b7a91920513883e993d589faf378d7c057c8f1f777cfb907332c1443302480"
+		docker: "weisburd/gnomad-readviz@sha256:c1d1720b12f4f66617e844fc31af2e5b9d755a75766a3fa9721bfa7b13c6c868"
 		cpu: 1
 		preemptible: 1
 		memory: "4 GB"
@@ -125,7 +125,7 @@ task RunHaplotypeCallerBamout {
 	}
 
 	runtime {
-		docker: "weisburd/gnomad-readviz@sha256:37b7a91920513883e993d589faf378d7c057c8f1f777cfb907332c1443302480"
+		docker: "weisburd/gnomad-readviz@sha256:c1d1720b12f4f66617e844fc31af2e5b9d755a75766a3fa9721bfa7b13c6c868"
 		cpu: 1
 		preemptible: 1
 		memory: "8 GB"
@@ -165,7 +165,7 @@ task ConvertBamToCram {
 	}
 
 	runtime {
-		docker: "weisburd/gnomad-readviz@sha256:37b7a91920513883e993d589faf378d7c057c8f1f777cfb907332c1443302480"
+		docker: "weisburd/gnomad-readviz@sha256:c1d1720b12f4f66617e844fc31af2e5b9d755a75766a3fa9721bfa7b13c6c868"
 		cpu: 1
 		preemptible: 1
 		memory: "2 GB"
