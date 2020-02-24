@@ -62,7 +62,7 @@ task PrintReadVizIntervals {
 			-O "~{output_prefix}.raw.bam"
 
 		ls -lh
-		echo --------------; df -kh; uptime; set +xe; echo "Done - time: $(date)"; echo --------------
+		echo --------------; free -h; df -kh; uptime; set +xe; echo "Done - time: $(date)"; echo --------------
 	>>>
 
 	output {
@@ -114,7 +114,7 @@ task RunHaplotypeCallerBamout {
 			-o "~{output_prefix}.gvcf"
 
 		ls -lh
-		echo --------------; df -kh; uptime; set +xe; echo "Done - time: $(date)"; echo --------------
+		echo --------------; free -h; df -kh; uptime; set +xe; echo "Done - time: $(date)"; echo --------------
 	>>>
 
 	output {
@@ -156,7 +156,7 @@ task ConvertBamToCram {
 		samtools index "~{output_prefix}.bamout.cram" "~{output_prefix}.bamout.cram.crai"
 
 		ls -lh
-		echo --------------; df -kh; uptime; set +xe; echo "Done - time: $(date)"; echo --------------
+		echo --------------; free -h; df -kh; uptime; set +xe; echo "Done - time: $(date)"; echo --------------
 	>>>
 
 	output {

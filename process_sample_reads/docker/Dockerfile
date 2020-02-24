@@ -2,9 +2,11 @@ FROM bitnami/minideb:stretch
 
 MAINTAINER Ben Weisburd
 
+# install basic linux utils like 'uptime' and 'free'
+RUN install_packages procps
+
 # install java-8    (adds ~350Mb)
 RUN install_packages default-jdk
-
 
 ENV SAMTOOLS_VERSION="1.9"
 
