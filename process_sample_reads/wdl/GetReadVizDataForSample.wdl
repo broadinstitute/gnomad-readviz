@@ -81,6 +81,7 @@ task PrintReadVizIntervals {
 		preemptible: 1
 		memory: "4 GB"
 		disks: "local-disk ${disk_size} HDD"
+		zone: "us-east1-a us-east1-b us-east1-c us-east1-d"
 	}
 }
 
@@ -126,9 +127,10 @@ task RunHaplotypeCallerBamout {
 	runtime {
 		docker: "weisburd/gnomad-readviz@sha256:c1d1720b12f4f66617e844fc31af2e5b9d755a75766a3fa9721bfa7b13c6c868"
 		cpu: 1
-		preemptible: 1
+		preemptible: 2
 		memory: "8 GB"
 		disks: "local-disk ${disk_size} HDD"
+		zone: "us-east1-a us-east1-b us-east1-c us-east1-d"
 	}
 }
 
@@ -169,6 +171,7 @@ task ConvertBamToCram {
 		preemptible: 1
 		memory: "2 GB"
 		disks: "local-disk ${disk_size} HDD"
+		zone: "us-east1-a us-east1-b us-east1-c us-east1-d"
 	}
 }
 
