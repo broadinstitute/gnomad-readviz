@@ -108,7 +108,6 @@ task RunHaplotypeCallerBamout {
 			-R ~{ref_fasta} \
 			-I "~{input_bam}" \
 			-L ~{variant_windows_interval_list} \
-			--disable_bam_indexing \
 			--disable_auto_index_creation_and_locking_when_reading_rods \
 			-bamout "~{output_prefix}.bamout.bam" \
 			-o "~{output_prefix}.gvcf"
@@ -136,8 +135,8 @@ task RunHaplotypeCallerBamout {
 task ConvertBamToCram {
 
 	input {
-		String input_bam
-		String input_bai
+		File input_bam
+		File input_bai
 
 		File ref_fasta
 		File ref_fasta_fai
@@ -216,8 +215,8 @@ workflow PrintReadVizReadsWorkflow {
 
 	call ConvertBamToCram {
 		input:
-			input_bam = PrintReadVizIntervals.output_raw_bam,
-			input_bai = PrintReadVizIntervals.output_raw_bai,
+			input_bam = RunHaplotypeCallerBamout.output_bamout_bam,
+			input_bai = RunHaplotypeCallerBamout.output_bamout_bai,
 			ref_fasta = ref_fasta,
 			ref_fasta_fai = ref_fasta_fai,
 			ref_fasta_dict = ref_fasta_dict,
