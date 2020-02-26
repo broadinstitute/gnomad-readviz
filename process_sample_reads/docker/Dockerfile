@@ -37,3 +37,6 @@ RUN java -jar /gatk/gatk.jar --version
 
 COPY --from=us.gcr.io/broad-gotc-prod/genomes-in-the-cloud:2.3.2-1510681135 /usr/gitc/GATK35.jar /gatk/GATK35.jar
 RUN java -jar /gatk/GATK35.jar --version
+
+COPY --from=weisburd/base-other-tools:latest /usr/local/bin/bedtools /usr/local/bin/bedtools
+RUN bedtools --version
