@@ -75,8 +75,8 @@ task RunHaplotypeCallerBamout {
 			-bamout "~{output_prefix}.bamout.bam" \
 			-o "~{output_prefix}.gvcf"  |& grep -v "^DEBUG"
 
-		bgzip ${output_prefix}.gvcf
-		tabix ${output_prefix}.gvcf.gz
+		bgzip "~{output_prefix}.gvcf"
+		tabix "~{output_prefix}.gvcf.gz"
 
 		ls -lh
 		echo --------------; free -h; df -kh; uptime; set +xe; echo "Done - time: $(date)"; echo --------------
