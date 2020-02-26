@@ -75,6 +75,9 @@ task RunHaplotypeCallerBamout {
 			-bamout "~{output_prefix}.bamout.bam" \
 			-o "~{output_prefix}.gvcf"  |& grep -v "^DEBUG"
 
+		bgzip ${output_prefix}.gvcf
+		tabix ${output_prefix}.gvcf.gz
+
 		ls -lh
 		echo --------------; free -h; df -kh; uptime; set +xe; echo "Done - time: $(date)"; echo --------------
 	>>>
@@ -82,8 +85,8 @@ task RunHaplotypeCallerBamout {
 	output {
 		File output_bamout_bam = "${output_prefix}.bamout.bam"
 		File output_bamout_bai = "${output_prefix}.bamout.bai"
-		File output_gvcf = "${output_prefix}.gvcf"
-		File output_gvcf_idx = "${output_prefix}.gvcf.idx"
+		File output_gvcf_gz = "${output_prefix}.gvcf.gz"
+		File output_gvcf_gz_tbi = "${output_prefix}.gvcf.gz.tbi"
 
 		# save small intermediate files for debugging
 		File input_cram_header = "header.bam"
@@ -187,8 +190,8 @@ workflow PrintReadVizReadsWorkflow {
 	output {
 		File output_bamout_cram = ConvertBamToCram.output_bamout_cram
 		File output_bamout_cram_crai = ConvertBamToCram.output_bamout_cram_crai
-		File output_gvcf = RunHaplotypeCallerBamout.output_gvcf
-		File output_gvcf_idx = RunHaplotypeCallerBamout.output_gvcf_idx
+		File output_gvcf_gz = RunHaplotypeCallerBamout.output_gvcf_gz
+		File output_gvcf_gz_tbi = RunHaplotypeCallerBamout.output_gvcf_gz_tbi
 
 		# save small intermediate files for debugging
 		File input_cram_header = RunHaplotypeCallerBamout.input_cram_header
