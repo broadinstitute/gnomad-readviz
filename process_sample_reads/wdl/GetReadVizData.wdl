@@ -148,7 +148,7 @@ task ConvertBamToCram {
 }
 
 
-workflow PrintReadVizReadsWorkflow {
+workflow GetReadVizDataWorkflow {
 	input {
 		File variants_tsv_bgz
 		File input_cram
