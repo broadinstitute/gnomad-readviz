@@ -2,9 +2,11 @@ import argparse
 import logging
 import hail as hl
 import hail.expr.aggregators as agg
+from gnomad.resources import MatrixTableResource
 from gnomad_hail.utils.slack import try_slack
 from gnomad_hail.utils.gnomad_functions import adjusted_sex_ploidy_expr
-from gnomad_qc.v3.resources import get_full_mt, meta_ht_path
+from gnomad_qc.v3.resources.raw import get_gnomad_v3_mt
+from gnomad_qc.v3.resources.meta import project_meta
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,13 +43,13 @@ def dp_threshold_expr(mt, dp_threshold):
         dp_threshold,
     )
 
-
 def main(args):
 
     hl.init(log="/readviz_prep", default_reference="GRCh38")
-    meta_ht = hl.read_table(meta_ht_path)
-    mt = get_full_mt(split=False, key_by_locus_and_alleles=True)
-    crams = hl.import_table(args.cram_paths).key_by("s")
+    meta_ht = hl.import_table(args.meta_table).key_by("s")
+
+    mt = MatrixTableResource(args.gnomad_mt).mt()
+    mt = hl.MatrixTable(hl.ir.MatrixKeyRowsBy(mt._mir, ['locus', 'alleles'], is_sorted=True))
 
     dp_threshold = args.dp_threshold
     gq_threshold = args.gq_threshold
@@ -62,8 +64,8 @@ def main(args):
         meta=hl.struct(
             sex=meta_join.sex,
             release=meta_join.release,
-            cram=crams[mt.s].final_cram_path,
-            crai=crams[mt.s].final_crai_path,
+            cram=meta_join.final_cram_path,
+            crai=meta_join.final_crai_path,
         )
     )
     logger.info("Filtering to releasable samples with a defined cram path")
@@ -142,7 +144,12 @@ if __name__ == "__main__":
         default=10,
     )
     parser.add_argument(
-        "--cram-paths",
+        "--gnomad-mt",
+        help="Path of the full gnomAD matrix table with genotypes",
+        default="gs://gnomad/raw/genomes/3.1/gnomad_v3.1_sparse_unsplit.repartitioned.mt",
+    )
+    parser.add_argument(
+        "--meta-table",
         help="Path to file containing sample, cram, and crai information with headers: s, final_cram_path, final_crai_path",
         required=True,
     )
