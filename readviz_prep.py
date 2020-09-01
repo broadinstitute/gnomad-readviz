@@ -45,7 +45,7 @@ def dp_threshold_expr(mt, dp_threshold):
 def main(args):
 
     hl.init(log="/readviz_prep", default_reference="GRCh38")
-    meta_ht = hl.import_table(args.meta_table).key_by("s")
+    meta_ht = hl.import_table(args.meta_table, impute=True).key_by("s")
 
     mt = MatrixTableResource(args.gnomad_mt).mt()
     mt = hl.MatrixTable(hl.ir.MatrixKeyRowsBy(mt._mir, ['locus', 'alleles'], is_sorted=True))
