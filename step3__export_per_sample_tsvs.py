@@ -17,7 +17,7 @@ def parse_args():
     p.add_argument(
         "-o", "--output-bucket-path",
         help="Path where the .tsvs for each sample will be written",
-        default="gs://gnomad-bw2/gnomad_readviz_tsvs",
+        default="gs://gnomad-bw2/gnomad_v3_1_readviz_tsvs",
     )
     p.add_argument(
         "-p", "--output-partitions",
