@@ -13,7 +13,7 @@ GCLOUD_PROJECT = "broad-mpg-gnomad"
 GCLOUD_USER_ACCOUNT = "weisburd@broadinstitute.org"
 GCLOUD_CREDENTIALS_LOCATION = "gs://weisburd-misc/creds"
 
-DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:283118579cbe8e2d4ec6b4fb3bc83a6950ac9a05fa7bebec9b45540859961a8d"
+DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:933128bf5219e2a219d77682425c1facd8f4f68e1985cdc874fd4aa1b145aa55"
 
 EXCLUDE_INTERVALS = "gs://gnomad-bw2/exclude_intervals_with_non_ACGT_bases_in_GRCh38.bed"
 
@@ -24,7 +24,7 @@ PADDING_AROUND_VARIANT = 200
 def parse_args():
 	"""Parse command line args."""
 
-	p = batch_utils.init_arg_parser(default_cpu=1, default_memory=3.75, gsa_key_file=os.path.expanduser("~/.config/gcloud/misc-270914-cb9992ec9b25.json"))
+	p = batch_utils.init_arg_parser(default_cpu=1, default_memory=7.5, gsa_key_file=os.path.expanduser("~/.config/gcloud/misc-270914-cb9992ec9b25.json"))
 	p.add_argument("-p", "--output-dir", help="Where to write haplotype caller output.", default="gs://gnomad-bw2/gnomad_v3_1_readviz_bamout")
 	p.add_argument("-n", "--num-samples-to-process", help="For testing, process only the first N samples.", type=int)
 	p.add_argument("-s", "--sample-to-process", help="For testing, process only the given sample id(s).", nargs="+")
@@ -73,9 +73,14 @@ def main():
 			j = batch_utils.init_job(batch, f"readviz: {row.sample_id}", DOCKER_IMAGE if not args.raw else None, args.cpu, args.memory)
 			batch_utils.switch_gcloud_auth_to_user_account(j, GCLOUD_CREDENTIALS_LOCATION, GCLOUD_USER_ACCOUNT, GCLOUD_PROJECT)
 
-			local_fasta = batch_utils.localize_file(j, batch_utils.HG38_REF_PATHS.fasta, gcloud_project=GCLOUD_PROJECT)
-			local_fasta_fai = batch_utils.localize_file(j, batch_utils.HG38_REF_PATHS.fai, gcloud_project=GCLOUD_PROJECT)
+
 			local_tsv_bgz = batch_utils.localize_file(j, row.variants_tsv_bgz, gcloud_project=GCLOUD_PROJECT)
+			local_fasta = batch_utils.localize_file(j, batch_utils.HG38_REF_PATHS.fasta, gcloud_project=GCLOUD_PROJECT, use_gcsfuse=True)
+			local_fasta_fai = batch_utils.localize_file(j, batch_utils.HG38_REF_PATHS.fai, gcloud_project=GCLOUD_PROJECT, use_gcsfuse=True)
+			local_cram_path = batch_utils.localize_file(j, row.cram_path, gcloud_project=GCLOUD_PROJECT)
+			local_crai_path = batch_utils.localize_file(j, row.crai_path, gcloud_project=GCLOUD_PROJECT)
+			batch_utils.localize_file(j, batch_utils.HG38_REF_PATHS.dict, gcloud_project=GCLOUD_PROJECT)
+
 			j.command(f"""echo --------------
 
 echo "Start - time: $(date)"
@@ -95,7 +100,7 @@ gunzip -c "{local_tsv_bgz}" | awk '{{ OFS="\t" }} {{ print( "chr"$1, $2, $2 ) }}
 java -Xms2g -jar /gatk/gatk.jar PrintReadsHeader \
 	--gcs-project-for-requester-pays {GCLOUD_PROJECT} \
 	-R {local_fasta} \
-	-I "{row.cram_path}" \
+	-I "{local_cram_path}" \
 	-O header.bam
 
 java -Xms2g -jar /gatk/gatk.jar BedToIntervalList \
@@ -110,7 +115,7 @@ java -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10 -XX:+DisableAttachMechanism -XX:M
 	-jar /gatk/GATK35.jar \
 	-T HaplotypeCaller \
 	-R {local_fasta} \
-	-I "{row.cram_path}" \
+	-I "{local_cram_path}" \
 	-L variant_windows.interval_list \
 	--disable_auto_index_creation_and_locking_when_reading_rods \
 	-ERC GVCF \
@@ -124,10 +129,10 @@ java -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10 -XX:+DisableAttachMechanism -XX:M
 bgzip "{output_prefix}.gvcf"
 tabix "{output_prefix}.gvcf.gz"
 
-gsutil -m cp "${output_prefix}.bamout.bam" {args.output_dir}
-gsutil -m cp "${output_prefix}.bamout.bai" {args.output_dir}
-gsutil -m cp "${output_prefix}.gvcf.gz" {args.output_dir}
-gsutil -m cp "${output_prefix}.gvcf.gz.tbi" {args.output_dir}
+gsutil -m cp "{output_prefix}.bamout.bam" {args.output_dir}
+gsutil -m cp "{output_prefix}.bamout.bai" {args.output_dir}
+gsutil -m cp "{output_prefix}.gvcf.gz" {args.output_dir}
+gsutil -m cp "{output_prefix}.gvcf.gz.tbi" {args.output_dir}
 
 ls -lh
 echo --------------; free -h; df -kh; uptime; set +xe; echo "Done - time: $(date)"; echo --------------
@@ -256,7 +261,7 @@ task RunHaplotypeCallerBamout {
 	}
 
 	runtime {
-		docker: "weisburd/gnomad-readviz@sha256:27e2f9de4615712cfb4006545b35b302dc79d0c16f5dc5ba1202bee49fa4ab53"
+		docker: "weisburd/gnomad-readviz@sha256:933128bf5219e2a219d77682425c1facd8f4f68e1985cdc874fd4aa1b145aa55"
 		cpu: 1
 		preemptible: 0
 		memory: "32 GiB"
@@ -299,7 +304,7 @@ task ConvertBamToCram {
 	}
 
 	runtime {
-		docker: "weisburd/gnomad-readviz@sha256:27e2f9de4615712cfb4006545b35b302dc79d0c16f5dc5ba1202bee49fa4ab53"
+		docker: "weisburd/gnomad-readviz@sha256:933128bf5219e2a219d77682425c1facd8f4f68e1985cdc874fd4aa1b145aa55"
 		cpu: 1
 		preemptible: 1
 		memory: "2 GiB"

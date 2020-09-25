@@ -87,8 +87,7 @@ RUN wget https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud
 ENV PATH=/google-cloud-sdk/bin:$PATH
 
 
-# install hail
-RUN python3 -m pip install hail
-
 # nice-to-have linux utils
 RUN install_packages less htop vim emacs
+
+RUN python3 -m pip install hail crcmod
