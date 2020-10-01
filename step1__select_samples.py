@@ -44,7 +44,7 @@ def dp_threshold_expr(mt, dp_threshold):
 
 def main(args):
 
-    hl.init(log="/readviz_prep", default_reference="GRCh38")
+    hl.init(log="/select_samples", default_reference="GRCh38")
     meta_ht = hl.import_table(args.meta_table, impute=True).key_by("s")
 
     mt = MatrixTableResource(args.gnomad_mt).mt()
@@ -119,9 +119,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--test", help="Test on chrX", action="store_true")
     parser.add_argument(
-        "--slack-channel", help="Slack channel to post results and notifications to."
-    )
-    parser.add_argument(
         "--overwrite", help="Overwrite if object already exists", action="store_true"
     )
     parser.add_argument(
@@ -158,3 +155,32 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(args)
+
+
+"""
+Output schema looks like:
+
+----------------------------------------
+Global fields:
+    None
+----------------------------------------
+Row fields:
+    'locus': locus<GRCh38>
+    'alleles': array<str>
+    'samples_w_het_var': array<struct {
+        S: str,
+        GQ: int32
+    }>
+    'samples_w_hom_var': array<struct {
+        S: str,
+        GQ: int32
+    }>
+    'samples_w_hemi_var': array<struct {
+        S: str,
+        GQ: int32
+    }>
+----------------------------------------
+Key: ['locus', 'alleles']
+----------------------------------------
+
+"""
