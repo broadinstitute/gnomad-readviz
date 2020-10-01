@@ -24,7 +24,7 @@ PADDING_AROUND_VARIANT = 200
 def parse_args():
 	"""Parse command line args."""
 
-	p = batch_utils.init_arg_parser(default_cpu=1, default_memory=7.5, gsa_key_file=os.path.expanduser("~/.config/gcloud/misc-270914-cb9992ec9b25.json"))
+	p = batch_utils.init_arg_parser(default_cpu=1, default_memory=3.75, gsa_key_file=os.path.expanduser("~/.config/gcloud/misc-270914-cb9992ec9b25.json"))
 	p.add_argument("-p", "--output-dir", help="Where to write haplotype caller output.", default="gs://gnomad-bw2/gnomad_v3_1_readviz_bamout")
 	p.add_argument("-n", "--num-samples-to-process", help="For testing, process only the first N samples.", type=int)
 	p.add_argument("-s", "--sample-to-process", help="For testing, process only the given sample id(s).", nargs="+")
@@ -42,13 +42,12 @@ def main():
 		p.error(f"{args.tsv_path} must contain 'sample_id', 'cram_path' columns")
 
 	# check that all buckets are in "US-CENTRAL1" or are multi-regional to avoid egress charges to the Batch cluster
-
+	batch_utils.set_gcloud_project(GCLOUD_PROJECT)
 	if args.cluster:
-		batch_utils.check_storage_bucket_region(df.cram_path, gcloud_project=GCLOUD_PROJECT)
+		batch_utils.check_storage_bucket_region(df.cram_path)
 
 	if not args.force:
 		hl.init(log="/dev/null", quiet=True)
-
 
 	# process samples
 	with batch_utils.run_batch(args, batch_name=f"HaplotypeCaller -bamout") as batch:
@@ -64,22 +63,21 @@ def main():
 			output_prefix = input_filename.replace(".bam", "").replace(".cram", "")
 
 			output_bam_path = os.path.join(args.output_dir, f"{output_prefix}.bamout.bam")
-			output_bai_path = os.path.join(args.output_dir, f"{output_prefix}.bamout.bam.bai")
+			output_bai_path = os.path.join(args.output_dir, f"{output_prefix}.bamout.bai")
 
 			if not args.force and hl.hadoop_is_file(output_bam_path) and hl.hadoop_is_file(output_bai_path):
 				logger.info(f"Output files exist (eg. {output_bam_path}). Skipping {input_filename}...")
 				continue
 
 			j = batch_utils.init_job(batch, f"readviz: {row.sample_id}", DOCKER_IMAGE if not args.raw else None, args.cpu, args.memory)
-			batch_utils.switch_gcloud_auth_to_user_account(j, GCLOUD_CREDENTIALS_LOCATION, GCLOUD_USER_ACCOUNT, GCLOUD_PROJECT)
+			batch_utils.switch_gcloud_auth_to_user_account(j, GCLOUD_CREDENTIALS_LOCATION, GCLOUD_USER_ACCOUNT)
 
-
-			local_tsv_bgz = batch_utils.localize_file(j, row.variants_tsv_bgz, gcloud_project=GCLOUD_PROJECT)
-			local_fasta = batch_utils.localize_file(j, batch_utils.HG38_REF_PATHS.fasta, gcloud_project=GCLOUD_PROJECT, use_gcsfuse=True)
-			local_fasta_fai = batch_utils.localize_file(j, batch_utils.HG38_REF_PATHS.fai, gcloud_project=GCLOUD_PROJECT, use_gcsfuse=True)
-			local_cram_path = batch_utils.localize_file(j, row.cram_path, gcloud_project=GCLOUD_PROJECT)
-			local_crai_path = batch_utils.localize_file(j, row.crai_path, gcloud_project=GCLOUD_PROJECT)
-			batch_utils.localize_file(j, batch_utils.HG38_REF_PATHS.dict, gcloud_project=GCLOUD_PROJECT)
+			local_tsv_bgz = batch_utils.localize_file(j, row.variants_tsv_bgz)
+			local_fasta = batch_utils.localize_file(j, batch_utils.HG38_REF_PATHS.fasta, use_gcsfuse=True)
+			local_fasta_fai = batch_utils.localize_file(j, batch_utils.HG38_REF_PATHS.fai, use_gcsfuse=True)
+			local_cram_path = batch_utils.localize_file(j, row.cram_path)
+			local_crai_path = batch_utils.localize_file(j, row.crai_path)
+			batch_utils.localize_file(j, batch_utils.HG38_REF_PATHS.dict)
 
 			j.command(f"""echo --------------
 
