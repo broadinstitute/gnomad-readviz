@@ -25,7 +25,7 @@ PADDING_AROUND_VARIANT = 200
 def parse_args():
 	"""Parse command line args."""
 
-	p = batch_utils.init_arg_parser(default_cpu=1, default_memory=3.75, default_billing_project="gnomAD-readviz", gsa_key_file=os.path.expanduser("~/.config/gcloud/misc-270914-cb9992ec9b25.json"))
+	p = batch_utils.init_arg_parser(default_cpu=1, default_billing_project="gnomAD-readviz", gsa_key_file=os.path.expanduser("~/.config/gcloud/misc-270914-cb9992ec9b25.json"))
 	p.add_argument("-p", "--output-dir", help="Where to write haplotype caller output.", default="gs://gnomad-bw2/gnomad_v3_1_readviz_bamout")
 	p.add_argument("-n", "--num-samples-to-process", help="For testing, process only the first N samples.", type=int)
 	p.add_argument("-s", "--sample-to-process", help="For testing, process only the given sample id(s).", nargs="+")
@@ -84,13 +84,12 @@ def main():
 			j.command(f"""echo --------------
 
 echo "Start - time: $(date)"
-set -euxo pipefail
 df -kh
 
 
 # 1) Convert variants_tsv_bgz to sorted interval list
 
-gunzip -c "{local_tsv_bgz}" | awk '{{ OFS="\t" }} {{ print( "chr"$1, $2, $2 ) }}' | bedtools slop -b {PADDING_AROUND_VARIANT/2} -g {local_fasta_fai} > variant_windows.bed
+gunzip -c "{local_tsv_bgz}" | awk '{{ OFS="\t" }} {{ print( "chr"$1, $2, $2 ) }}' | bedtools slop -b {PADDING_AROUND_VARIANT} -g {local_fasta_fai} > variant_windows.bed
 
 # Sort the .bed file so that chromosomes are in the same order as in the input_cram file.
 # Without this, if the input_cram has a different chromosome ordering (eg. chr1, chr10, .. vs. chr1, chr2, ..)
@@ -111,7 +110,7 @@ java -Xms2g -jar /gatk/gatk.jar BedToIntervalList \
 
 # 2) Get reads from the input_cram for the intervals in variant_windows.interval_list
 
-java -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10 -XX:+DisableAttachMechanism -XX:MaxHeapSize=2000m -Xmx30000m \
+time java -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10 -XX:+DisableAttachMechanism -XX:MaxHeapSize=2000m -Xmx30000m \
 	-jar /gatk/GATK35.jar \
 	-T HaplotypeCaller \
 	-R {local_fasta} \
