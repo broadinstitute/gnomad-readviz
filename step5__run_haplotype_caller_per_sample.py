@@ -14,10 +14,10 @@ GCLOUD_PROJECT = "broad-mpg-gnomad"
 GCLOUD_USER_ACCOUNT = "weisburd@broadinstitute.org"
 GCLOUD_CREDENTIALS_LOCATION = "gs://weisburd-misc/creds"
 
-DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:933128bf5219e2a219d77682425c1facd8f4f68e1985cdc874fd4aa1b145aa55"
+DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:809b1f6088f399a83cd6594424a47f1d6aa72e58074f8f8ad83740dbb993a237"
 
-EXCLUDE_INTERVALS = "gs://gnomad-bw2/exclude_intervals_with_non_ACGT_bases_in_GRCh38.bed"
-
+#EXCLUDE_INTERVALS = "gs://gnomad-bw2/exclude_intervals_with_non_ACGT_bases_in_GRCh38.bed"
+EXCLUDE_INTERVALS = "gs://gnomad-bw2/exclude_intervals_with_non_ACGT_bases_in_GRCh38__150bp_window.bed"
 
 PADDING_AROUND_VARIANT = 200
 
@@ -56,9 +56,6 @@ def main():
 		for _, row in tqdm.tqdm(df.iterrows(), unit=" rows", total=len(df)):
 			if args.sample_to_process and row.sample_id not in set(args.sample_to_process):
 				continue
-			counter += 1
-			if args.num_samples_to_process and counter > args.num_samples_to_process:
-				break
 
 			input_filename = os.path.basename(row.cram_path)
 			output_prefix = input_filename.replace(".bam", "").replace(".cram", "")
@@ -70,16 +67,20 @@ def main():
 				logger.info(f"Output files exist (eg. {output_bam_path}). Skipping {input_filename}...")
 				continue
 
+			counter += 1
+			if args.num_samples_to_process and counter > args.num_samples_to_process:
+				break
+
 			j = batch_utils.init_job(batch, f"readviz: {row.sample_id}", DOCKER_IMAGE if not args.raw else None, args.cpu, args.memory)
 			batch_utils.switch_gcloud_auth_to_user_account(j, GCLOUD_CREDENTIALS_LOCATION, GCLOUD_USER_ACCOUNT)
 
+			local_exclude_intervals = batch_utils.localize_file(j, EXCLUDE_INTERVALS)
 			local_fasta = batch_utils.localize_file(j, batch_utils.HG38_REF_PATHS.fasta, use_gcsfuse=True)
 			local_fasta_fai = batch_utils.localize_file(j, batch_utils.HG38_REF_PATHS.fai, use_gcsfuse=True)
 			batch_utils.localize_file(j, batch_utils.HG38_REF_PATHS.dict, use_gcsfuse=True)
 			local_tsv_bgz = batch_utils.localize_file(j, row.variants_tsv_bgz)
 			local_cram_path = batch_utils.localize_file(j, row.cram_path)
 			local_crai_path = batch_utils.localize_file(j, row.crai_path)
-
 
 			j.command(f"""echo --------------
 
@@ -116,6 +117,7 @@ time java -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10 -XX:+DisableAttachMechanism 
 	-R {local_fasta} \
 	-I "{local_cram_path}" \
 	-L variant_windows.interval_list \
+	-XL {local_exclude_intervals} \
 	--disable_auto_index_creation_and_locking_when_reading_rods \
 	-ERC GVCF \
 	--max_alternate_alleles 3 \

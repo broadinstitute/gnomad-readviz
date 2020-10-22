@@ -90,4 +90,13 @@ ENV PATH=/google-cloud-sdk/bin:$PATH
 # nice-to-have linux utils
 RUN install_packages less htop vim emacs
 
+RUN wget https://www.sqlite.org/2020/sqlite-autoconf-3330000.tar.gz \
+    && tar xzf sqlite-autoconf-3330000.tar.gz \
+    && cd sqlite-autoconf-3330000 \
+    && ./configure --prefix=/usr/local \
+    && make \
+    && make install \
+    && cd .. \
+    && rm -rf sqlite-autoconf-3330000*
+
 RUN python3 -m pip install hail crcmod
