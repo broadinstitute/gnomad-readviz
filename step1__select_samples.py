@@ -6,6 +6,7 @@ from gnomad.resources import MatrixTableResource
 from gnomad.sample_qc.sex import adjusted_sex_ploidy_expr
 from gnomad_qc.v3.resources.raw import get_gnomad_v3_mt
 from gnomad_qc.v3.resources.meta import project_meta
+from gnomad_methods.gnomad.utils.annotations import annotate_adj
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,13 +35,6 @@ def hemi_expr(mt):
         mt.GT.is_haploid() & (mt.meta.sex == "male") & (mt.GT[0] == 1),
     )
 
-
-def dp_threshold_expr(mt, dp_threshold):
-    return hl.if_else(
-        (mt.meta.sex == "male") & (mt.locus.in_x_nonpar() | mt.locus.in_y_nonpar()),
-        dp_threshold / 2,
-        dp_threshold,
-    )
 
 def main(args):
 
@@ -83,12 +77,9 @@ def main(args):
     )
     mt = mt.select_entries("GT", "GQ", "DP")
 
-    logger.info("Filtering to entries meeting GQ and DP thresholds")
-    mt = mt.filter_entries(
-        (mt.GQ >= gq_threshold)
-        & (mt.DP >= dp_threshold_expr(mt, dp_threshold))
-        & (mt.GT.is_non_ref())
-    )
+    logger.info("Filtering to entries meeting GQ, DP and other 'adj' thresholds")
+    mt = annotate_adj(mt)
+    mt = mt.filter_entries(mt.adj)
     mt = mt.filter_rows(hl.agg.any(mt.GT.is_non_ref()))
     mt = mt.filter_rows(hl.len(mt.alleles) > 1)
 
