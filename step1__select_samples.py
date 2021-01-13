@@ -1,11 +1,9 @@
 import argparse
 import logging
 import hail as hl
-import hail.expr.aggregators as agg
 from gnomad.resources import MatrixTableResource
 from gnomad.sample_qc.sex import adjusted_sex_ploidy_expr
-from gnomad_qc.v3.resources.raw import get_gnomad_v3_mt
-from gnomad_qc.v3.resources.meta import project_meta
+from gnomad.utils.filtering import filter_to_adj
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,24 +33,19 @@ def hemi_expr(mt):
     )
 
 
-def dp_threshold_expr(mt, dp_threshold):
-    return hl.if_else(
-        (mt.meta.sex == "male") & (mt.locus.in_x_nonpar() | mt.locus.in_y_nonpar()),
-        dp_threshold / 2,
-        dp_threshold,
-    )
-
 def main(args):
 
     hl.init(log="/select_samples", default_reference="GRCh38")
-    meta_ht = hl.import_table(args.meta_table, impute=True).key_by("s")
+    meta_ht = hl.read_table(args.sample_metadata_ht)
+    meta_ht = meta_ht.filter(meta_ht.release & hl.is_defined(meta_ht.project_meta.cram_path))
+    meta_ht = meta_ht.select(
+        cram_path=meta_ht.project_meta.cram_path,
+        crai_path=meta_ht.project_meta.cram_path.replace(".cram", ".cram.crai"),
+        sex=meta_ht.project_meta.sex,
+    )
 
     mt = MatrixTableResource(args.gnomad_mt).mt()
     mt = hl.MatrixTable(hl.ir.MatrixKeyRowsBy(mt._mir, ['locus', 'alleles'], is_sorted=True))
-
-    dp_threshold = args.dp_threshold
-    gq_threshold = args.gq_threshold
-    num_samples = args.num_samples
 
     if args.test:
         logger.info("Filtering to chrX PAR1 boundary: chrX:2781477-2781900")
@@ -62,13 +55,12 @@ def main(args):
     mt = mt.annotate_cols(
         meta=hl.struct(
             sex=meta_join.sex,
-            release=meta_join.release,
-            cram=meta_join.final_cram_path,
-            crai=meta_join.final_crai_path,
+            cram=meta_join.cram_path,
+            crai=meta_join.crai_path,
         )
     )
     logger.info("Filtering to releasable samples with a defined cram path")
-    mt = mt.filter_cols(mt.meta.release & hl.is_defined(mt.meta.cram))
+    mt = mt.filter_cols(hl.is_defined(mt.meta.cram))
     mt = hl.experimental.sparse_split_multi(mt, filter_changed_loci=True)
 
     logger.info("Adjusting samples' sex ploidy")
@@ -83,30 +75,26 @@ def main(args):
     )
     mt = mt.select_entries("GT", "GQ", "DP")
 
-    logger.info("Filtering to entries meeting GQ and DP thresholds")
-    mt = mt.filter_entries(
-        (mt.GQ >= gq_threshold)
-        & (mt.DP >= dp_threshold_expr(mt, dp_threshold))
-        & (mt.GT.is_non_ref())
-    )
+    logger.info("Filtering to entries meeting GQ, DP and other 'adj' thresholds")
+    mt = filter_to_adj(mt)
     mt = mt.filter_rows(hl.agg.any(mt.GT.is_non_ref()))
     mt = mt.filter_rows(hl.len(mt.alleles) > 1)
 
     logger.info(
-        f"Taking up to {num_samples} samples per site where samples are het, hom_var, or hemi"
+        f"Taking up to {args.num_samples} samples per site where samples are het, hom_var, or hemi"
     )
     mt = mt.annotate_rows(
         samples_w_het_var=hl.agg.filter(
             het_expr(mt),
-            hl.agg.take(het_hom_hemi_take_expr(mt), num_samples, ordering=-mt.GQ),
+            hl.agg.take(het_hom_hemi_take_expr(mt), args.num_samples, ordering=-mt.GQ),
         ),
         samples_w_hom_var=hl.agg.filter(
             hom_expr(mt),
-            hl.agg.take(het_hom_hemi_take_expr(mt), num_samples, ordering=-mt.GQ),
+            hl.agg.take(het_hom_hemi_take_expr(mt), args.num_samples, ordering=-mt.GQ),
         ),
         samples_w_hemi_var=hl.agg.filter(
             hemi_expr(mt),
-            hl.agg.take(het_hom_hemi_take_expr(mt), num_samples, ordering=-mt.GQ),
+            hl.agg.take(het_hom_hemi_take_expr(mt), args.num_samples, ordering=-mt.GQ),
         ),
     )
 
@@ -117,21 +105,13 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--test", help="Test on chrX", action="store_true")
     parser.add_argument(
-        "--overwrite", help="Overwrite if object already exists", action="store_true"
+        "--test",
+        help="Test on chrX", action="store_true",
     )
     parser.add_argument(
-        "--dp-threshold",
-        type=int,
-        help="Lower depth threshold for sample list",
-        default=10,
-    )
-    parser.add_argument(
-        "--gq-threshold",
-        type=int,
-        help="Lower genotype quality threshold for sample list",
-        default=20,
+        "--overwrite",
+        help="Overwrite if object already exists", action="store_true",
     )
     parser.add_argument(
         "--num-samples",
@@ -145,12 +125,14 @@ if __name__ == "__main__":
         default="gs://gnomad/raw/genomes/3.1/gnomad_v3.1_sparse_unsplit.repartitioned.mt",
     )
     parser.add_argument(
-        "--meta-table",
-        help="Path to file containing sample, cram, and crai information with headers: s, final_cram_path, final_crai_path",
-        required=True,
+        "--sample-metadata-ht",
+        help="Path of the gnomAD sample metadata ht",
+        default="gs://gnomad/metadata/genomes_v3.1/gnomad_v3.1_sample_qc_metadata.ht",
     )
     parser.add_argument(
-        "--output-ht-path", help="Path for output hail table", required=True
+        "--output-ht-path",
+        help="Path for output hail table",
+        required=True,
     )
     args = parser.parse_args()
 
