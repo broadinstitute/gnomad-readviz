@@ -41,7 +41,8 @@ def main(args):
     meta_ht = meta_ht.select(
         cram_path=meta_ht.project_meta.cram_path,
         crai_path=meta_ht.project_meta.cram_path.replace(".cram", ".cram.crai"),
-        sex=meta_ht.project_meta.sex)
+        sex=meta_ht.project_meta.sex,
+    )
 
     mt = MatrixTableResource(args.gnomad_mt).mt()
     mt = hl.MatrixTable(hl.ir.MatrixKeyRowsBy(mt._mir, ['locus', 'alleles'], is_sorted=True))
