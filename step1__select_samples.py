@@ -60,7 +60,7 @@ def main(args):
         )
     )
     logger.info("Filtering to releasable samples with a defined cram path")
-    mt = mt.filter_cols(hl.is_defined(mt.meta.cram))
+    mt = mt.filter_cols(mt.meta.release & hl.is_defined(mt.meta.cram))
     mt = hl.experimental.sparse_split_multi(mt, filter_changed_loci=True)
 
     logger.info("Adjusting samples' sex ploidy")
@@ -73,7 +73,7 @@ def main(args):
             xx_karyotype_str="female",
         )
     )
-    mt = mt.select_entries("GT", "GQ", "DP")
+    mt = mt.select_entries("GT", "GQ", "DP", "AD")
 
     logger.info("Filtering to entries meeting GQ, DP and other 'adj' thresholds")
     mt = filter_to_adj(mt)
