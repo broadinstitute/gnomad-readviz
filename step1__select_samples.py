@@ -73,7 +73,7 @@ def main(args):
             xx_karyotype_str="female",
         )
     )
-    mt = mt.select_entries("GT", "GQ", "DP")
+    mt = mt.select_entries("GT", "GQ", "DP", "AD")
 
     logger.info("Filtering to entries meeting GQ, DP and other 'adj' thresholds")
     mt = filter_to_adj(mt)
