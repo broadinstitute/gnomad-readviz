@@ -21,10 +21,13 @@ GCLOUD_PROJECT = "broad-mpg-gnomad"
 GCLOUD_USER_ACCOUNT = "weisburd@broadinstitute.org"
 GCLOUD_CREDENTIALS_LOCATION = "gs://weisburd-misc/creds"
 
-DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:809b1f6088f399a83cd6594424a47f1d6aa72e58074f8f8ad83740dbb993a237"
+DOCKER_IMAGE = "gcr.io/broad-mpg-gnomad/gnomad-readviz@sha256:7013fc57e3471617a314b08e2bcefe4711d401f83500c5c57e9a3e79ee8efebd"
 
-INPUT_BAM_BUCKET = "gs://gnomad-bw2/gnomad_all_readviz_bamout_deidentified"
-OUTPUT_BUCKET = "gs://gnomad-bw2/gnomad_all_combined_bamout"
+#INPUT_BAM_BUCKET = "gs://gnomad-bw2/gnomad_all_readviz_bamout_deidentified"
+INPUT_BAM_BUCKET = "gs://gnomad-bw2/gnomad_all_readviz_bamout_deidentified_v3_and_v31_fixed__20210101"
+
+#OUTPUT_BUCKET = "gs://gnomad-bw2/gnomad_all_combined_bamout"
+OUTPUT_BUCKET =  "gs://gnomad-bw2/gnomad_all_combined_bamout_deidentified_v3_and_v31_fixed__20210101"
 
 DEFAULT_GROUP_SIZE = 50
 ALL_CHROMOSOMES = [str(c) for c in range(1, 23)] + ["X", "Y", "M"]

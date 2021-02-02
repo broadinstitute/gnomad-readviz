@@ -95,7 +95,7 @@ task RunHaplotypeCallerBamout {
 	}
 
 	runtime {
-		docker: "weisburd/gnomad-readviz@sha256:27e2f9de4615712cfb4006545b35b302dc79d0c16f5dc5ba1202bee49fa4ab53"
+		docker: "gcr.io/broad-mpg-gnomad/gnomad-readviz@sha256:7013fc57e3471617a314b08e2bcefe4711d401f83500c5c57e9a3e79ee8efebd"
 		cpu: 1
 		preemptible: 1
 		memory: "8 GiB"
@@ -138,7 +138,7 @@ task ConvertBamToCram {
 	}
 
 	runtime {
-		docker: "weisburd/gnomad-readviz@sha256:27e2f9de4615712cfb4006545b35b302dc79d0c16f5dc5ba1202bee49fa4ab53"
+		docker: "gcr.io/broad-mpg-gnomad/gnomad-readviz@sha256:7013fc57e3471617a314b08e2bcefe4711d401f83500c5c57e9a3e79ee8efebd"
 		cpu: 1
 		preemptible: 1
 		memory: "2 GiB"
