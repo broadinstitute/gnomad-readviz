@@ -14,7 +14,7 @@ GCLOUD_PROJECT = "broad-mpg-gnomad"
 GCLOUD_USER_ACCOUNT = "weisburd@broadinstitute.org"
 GCLOUD_CREDENTIALS_LOCATION = "gs://weisburd-misc/creds"
 
-DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:809b1f6088f399a83cd6594424a47f1d6aa72e58074f8f8ad83740dbb993a237"
+DOCKER_IMAGE = "gcr.io/broad-mpg-gnomad/gnomad-readviz@sha256:7013fc57e3471617a314b08e2bcefe4711d401f83500c5c57e9a3e79ee8efebd"
 
 #EXCLUDE_INTERVALS = "gs://gnomad-bw2/exclude_intervals_with_non_ACGT_bases_in_GRCh38.bed"
 EXCLUDE_INTERVALS = "gs://gnomad-bw2/exclude_intervals_with_non_ACGT_bases_in_GRCh38__150bp_window.bed"

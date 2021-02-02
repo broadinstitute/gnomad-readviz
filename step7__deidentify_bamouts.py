@@ -20,23 +20,19 @@ GCLOUD_PROJECT = "broad-mpg-gnomad"
 GCLOUD_USER_ACCOUNT = "weisburd@broadinstitute.org"
 GCLOUD_CREDENTIALS_LOCATION = "gs://weisburd-misc/creds"
 
-DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:809b1f6088f399a83cd6594424a47f1d6aa72e58074f8f8ad83740dbb993a237"
+DOCKER_IMAGE = "gcr.io/broad-mpg-gnomad/gnomad-readviz@sha256:7013fc57e3471617a314b08e2bcefe4711d401f83500c5c57e9a3e79ee8efebd"
 
-#EXCLUDE_INTERVALS = "gs://gnomad-bw2/exclude_intervals_with_non_ACGT_bases_in_GRCh38.bed"
-TSV_BUCKET = "gs://gnomad-bw2/gnomad_all_readviz_tsvs"
-BAMOUT_BUCKET = "gs://gnomad-bw2/gnomad_all_readviz_bamout"
-
-OUTPUT_BUCKET = "gs://gnomad-bw2/gnomad_all_readviz_bamout_deidentified"
+OUTPUT_BUCKET = "gs://gnomad-bw2/gnomad_all_readviz_bamout_deidentified_v3_and_v31_fixed__20210101"
 
 
 def parse_args():
     """Parse command line args."""
 
     p = batch_utils.init_arg_parser(default_cpu=0.25, default_billing_project="gnomAD-readviz", gsa_key_file=os.path.expanduser("~/.config/gcloud/misc-270914-cb9992ec9b25.json"))
-    p.add_argument("-p", "--output-dir", help="Where to write combined bams.", default=OUTPUT_BUCKET)
     p.add_argument("-n", "--num-samples-to-process", help="For testing, process only the given sample id(s).", type=int)
     p.add_argument("--random", action="store_true", help="Select random sample")
     p.add_argument("-s", "--sample-to-process", help="For testing, process only the given sample id(s).", action="append")
+    p.add_argument("--output-dir", help="Where to write combined bams.", default=OUTPUT_BUCKET)
     p.add_argument("cram_and_tsv_paths_table", help="A text file containing at least these columns: sample_id, cram_path")
     args = p.parse_args()
 
@@ -101,7 +97,9 @@ def main():
                 batch_utils.switch_gcloud_auth_to_user_account(j, GCLOUD_CREDENTIALS_LOCATION, GCLOUD_USER_ACCOUNT)
 
                 local_tsv_path = batch_utils.localize_file(j, row.variants_tsv_bgz, use_gcsfuse=True)
+                local_exclude_tsv_path = batch_utils.localize_file(j, row.exclude_variants_tsv_bgz, use_gcsfuse=True)
                 local_bamout_path = batch_utils.localize_file(j, row.output_bamout_bam, use_gcsfuse=True)
+
                 batch_utils.localize_file(j, row.output_bamout_bai, use_gcsfuse=True)
 
                 j.command(f"""echo --------------
@@ -113,7 +111,7 @@ cat <<EOF > deidentify_bamout.py
 {deidentify_bamouts_script}
 EOF
 
-time python3 deidentify_bamout.py "{row.sample_id}" "{local_bamout_path}" "{local_tsv_path}"
+time python3 deidentify_bamout.py -x "{local_exclude_tsv_path}" "{row.sample_id}" "{local_bamout_path}" "{local_tsv_path}"
 
 ls -lh
 
@@ -140,7 +138,7 @@ echo --------------; free -h; df -kh; uptime; set +xe; echo "Done - time: $(date
 echo "Start - time: $(date)"
 df -kh
 
-samtools sort -o "{row.sample_id}.deidentify_output.sorted.bam" {local_bamout_path}
+samtools sort -o "{row.sample_id}.deidentify_output.sorted.bam" "{local_bamout_path}"
 samtools index "{row.sample_id}.deidentify_output.sorted.bam"
 
 ls -lh
@@ -151,7 +149,7 @@ gsutil -m cp "{row.sample_id}.deidentify_output.sorted.bam.bai"  {args.output_di
 echo --------------; free -h; df -kh; uptime; set +xe; echo "Done - time: $(date)"; echo --------------
 
 """)
-            else:
+            elif run_sort:
                 logger.info(f"Sorted output files exist (eg. {output_sorted_bam_path}). Skipping sort for {row.sample_id}...")
 
 

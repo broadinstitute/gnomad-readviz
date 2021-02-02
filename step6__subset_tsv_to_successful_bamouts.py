@@ -8,18 +8,62 @@ import subprocess
 logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-#hl.init(log="/dev/null")
+hl.init(log="/dev/null")
+
+#%%
+ht = hl.read_table("gs://gnomad/metadata/genomes_v3.1/gnomad_v3.1_sample_qc_metadata.ht")
+ht = ht.filter(ht.release)
+release_samples = ht.s.collect()
+
 
 #%%
 
-bams_v3 = subprocess.check_output("gsutil ls -l gs://gnomad-bw2/gnomad_readviz_bamout/*.bam", shell=True, encoding="UTF-8")
-bams_v3 = bams_v3.strip().split("\n")
+sample_ids_gnomad_v3 = hl.hadoop_open("gs://gnomad-bw2/sample_ids_gnomad_v3__20210131.txt").read().split("\n")
+release_sample_ids_gnomad_v3 = list(set(sample_ids_gnomad_v3) & set(release_samples))  # 39285 samples
+
+sample_ids_gnomad_v3_1 = hl.hadoop_open("gs://gnomad-bw2/sample_ids_gnomad_v3_1__20210131.txt").read().split("\n")
+release_sample_ids_gnomad_v3_1 = list(set(sample_ids_gnomad_v3_1) & set(release_samples))  # 3526 samples
 
 #%%
 
-def get_v3_sample_id(bam_path):
-    sample_id = os.path.basename(bam_path).replace(".bamout.bam", "")
-    if sample_id.startswith("I-PAL") or sample_id in {
+all_bamouts = subprocess.check_output("gsutil ls gs://gnomad-bw2/gnomad_all_readviz_bamout/*.bam", shell=True, encoding="UTF-8")
+all_bamouts = all_bamouts.strip().split("\n")
+
+#%%
+
+all_tsvs = subprocess.check_output("gsutil ls gs://gnomad-bw2/gnomad_all_readviz_tsvs/*.tsv.bgz", shell=True, encoding="UTF-8")
+all_tsvs = all_tsvs.strip().split("\n")
+
+#%%
+
+exclude_tsvs_gnomad_v3 = subprocess.check_output("gsutil ls gs://gnomad-bw2/gnomad_v3__readviz_tsvs__variants_that_failed_AB_filter/*.tsv.bgz", shell=True, encoding="UTF-8")
+exclude_tsvs_gnomad_v3 = exclude_tsvs_gnomad_v3.strip().split("\n")
+
+#%%
+
+exclude_tsvs_gnomad_v3_1 = subprocess.check_output("gsutil ls gs://gnomad-bw2/gnomad_v3_1_readviz_tsvs__variants_that_failed_AB_filter/*.tsv.bgz", shell=True, encoding="UTF-8")
+exclude_tsvs_gnomad_v3_1 = exclude_tsvs_gnomad_v3_1.strip().split("\n")
+
+
+
+#%%
+
+def get_v3_sample_id(file_path):
+    sample_id = os.path.basename(file_path)
+    sample_id = sample_id.replace(".bamout.bam", "")
+    sample_id = sample_id.replace(".tsv.bgz", "")
+
+    sample_id = sample_id.replace(".final.bamout", "")
+    sample_id = sample_id.split(".alt_bwamem")[0]
+    sample_id = sample_id.split(".srt.aln")[0]
+    sample_id = sample_id.split(".final")[0]
+    sample_id = sample_id.replace("v3.1::", "")
+
+    if sample_id == "NA18874":
+        sample_id = "NA18874A"
+    if sample_id == "NA12830":
+        sample_id = "NA12830A"
+    elif (sample_id.startswith("I-PAL") and " " not in sample_id) or sample_id in {
         'CS-0041-01_C',
         'CS-0055-01_A',
         'CS-0060-01_C',
@@ -36,95 +80,46 @@ def get_v3_sample_id(bam_path):
         'ML-1182-01_D',
     }:
         i = sample_id.rfind("_")
-        sample_id = sample_id[:i] + "-" + sample_id[i+1:]
+        sample_id = sample_id[:i] + " " + sample_id[i+1:]
     elif sample_id == '11129':
-        sample_id = "CCDG--11129"
+        sample_id = "CCDG::11129"
 
     return sample_id
 
-bams_v3_sample_id_map = {get_v3_sample_id(p): p for p in bams_v3}
+sample_id_to_bamout_map = {get_v3_sample_id(p): p for p in all_bamouts}
+sample_id_to_tsv_map = {get_v3_sample_id(p): p for p in all_tsvs}
+sample_id_to_exclude_tsv_map = {get_v3_sample_id(p): p for p in exclude_tsvs_gnomad_v3 + exclude_tsvs_gnomad_v3_1}
 
 
 #%%
 
-df_v3 = pd.read_table("./cram_and_tsv_paths_table_v3_original.tsv")
-df_v3.variants_tsv_bgz = df_v3.variants_tsv_bgz.fillna(df_v3.variants_tsv_path)
-df_v3 = df_v3[['s', "entity:participant_id", 'variants_tsv_bgz', 'output_bamout_bam', "output_bamout_bai"]]
+output_table = []
+for sample_id in set(release_sample_ids_gnomad_v3) | set(release_sample_ids_gnomad_v3_1):
+    sample_id = sample_id.replace("v3.1::", "")
+    if sample_id not in sample_id_to_bamout_map:
+        print(f"sample_id_to_bamout_map is missing '{sample_id}'")
 
-print(df_v3.columns)
+    if sample_id not in sample_id_to_tsv_map:
+        print(f"sample_id_to_tsv_map is missing '{sample_id}'")
 
-assert len(set(bams_v3_sample_id_map.keys()) - set(df_v3["entity:participant_id"])) == 0
+    if sample_id not in sample_id_to_exclude_tsv_map:
+        print(f"sample_id_to_exclude_tsv_map is missing '{sample_id}'")
 
-#%%
-
-df_v3 = pd.DataFrame(bams_v3_sample_id_map.items(), columns=["sample_id", "output_bamout_bam"]).set_index("sample_id").join(
-    df_v3[["entity:participant_id", "variants_tsv_bgz"]].set_index("entity:participant_id"),
-    how="inner")
-
-#%%
-df_v3["output_bamout_bai"] = df_v3.output_bamout_bam.apply(lambda s: re.sub(".bam$", ".bai", s))
-
-df_v3 = df_v3.reset_index().rename(columns={"index": "sample_id"})
-
-df_v3[["sample_id", "variants_tsv_bgz", "output_bamout_bam", "output_bamout_bai"]].to_csv("./cram_and_tsv_paths_table_v3.tsv", header=True, index=False, sep="\t")
-df_v3.columns
-
-
-
+    output_table.append({
+        "sample_id": sample_id,
+        "output_bamout_bam": sample_id_to_bamout_map[sample_id],
+        "output_bamout_bai": re.sub(".bam$", ".bai", sample_id_to_bamout_map[sample_id]),
+        "variants_tsv_bgz": sample_id_to_tsv_map[sample_id],
+        "exclude_variants_tsv_bgz": sample_id_to_exclude_tsv_map[sample_id],
+    })
 
 #%%
 
-bams_v3_1 = subprocess.check_output("gsutil ls gs://gnomad-bw2/gnomad_v3_1_readviz_bamout/*.bam", shell=True, encoding="UTF-8")
-bams_v3_1 = bams_v3_1.strip().split("\n")
+[x for x in sample_id_to_exclude_tsv_map.keys() if "HG01776" in x]
 
 #%%
 
-
-def get_v3_1_sample_id(bam_path):
-    sample_id = os.path.basename(bam_path).replace(".bamout.bam", "")
-    sample_id = sample_id.replace(".final", "")
-    sample_id = sample_id.replace(".srt.aln", "")
-    sample_id = sample_id.split(".alt_bwamem_GRCh38D")[0]
-    if sample_id == "NA12546": sample_id = "NA12546B"
-    if sample_id == "NA12830": sample_id = "NA12830A"
-    if sample_id == "NA18874": sample_id = "NA18874A"
-    return sample_id
-
-bams_v3_1_sample_id_map = {get_v3_1_sample_id(p): p for p in bams_v3_1}
-
-
-#%%
-df_v3_1 = pd.read_table("./step4_output__cram_and_tsv_paths_table_v3_1.tsv")
-
-
-df_v3_1.columns
-
-#%%
-
-df_v3_1 = pd.DataFrame(bams_v3_1_sample_id_map.items(), columns=["sample_id", "output_bamout_bam"]).set_index("sample_id").join(
-    df_v3_1[["sample_id", "variants_tsv_bgz"]].set_index("sample_id"),
-    how="inner")
-
-df_v3_1 = df_v3_1.reset_index().rename(columns={"index": "sample_id"})
-
-df_v3_1["output_bamout_bai"] = df_v3_1.output_bamout_bam.apply(lambda s: re.sub(".bam$", ".bai", s))
-
-df_v3_1 = df_v3_1[["sample_id", "variants_tsv_bgz", "output_bamout_bam", "output_bamout_bai"]]
-
-df_v3_1.columns
-
-
-#%%
-
-
-df = pd.concat([df_v3, df_v3_1])
-
-df
-
-#%%
-
-df[["sample_id", "variants_tsv_bgz", "output_bamout_bam", "output_bamout_bai"]].to_csv(
-    "./cram_and_tsv_paths_table__v3_and_v3_1.tsv", header=True, index=False, sep="\t")
-
+df = pd.DataFrame(output_table)
+df.to_csv("./cram_and_tsv_paths_table_v3_and_v31_with_exclude_variants.tsv", header=True, index=False, sep="\t")
 
 #%%

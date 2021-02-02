@@ -6,6 +6,26 @@ import hail as hl
 import os
 #%%
 
+"""
+ht_meta = hl.read_table("gs://gnomad/metadata/genomes_v3.1/gnomad_v3.1_sample_qc_metadata.ht")
+v31_all_samples = ht_meta.s.collect()      # 153,030 samples
+ht_meta =  ht_meta.filter(ht_meta.release)
+v31_release_samples = ht_meta.s.collect()  # 76,156 samples
+
+
+ht = hl.read_table("gs://gnomad-bw2/gnomad_v3_1_readviz_crams__that_failed_AB_filter_exploded_keyed_by_sample.ht")
+current_samples_v31 = ht.distinct().S.collect()  # 4,445 samples
+len(set(current_samples_v31) - set(v31_release_samples))   # 919 samples  
+
+ht = hl.read_table("gs://gnomad-bw2/gnomad_v3_readviz_crams__that_failed_AB_filter_exploded_keyed_by_sample.ht")
+current_samples_v3 = ht.distinct().S.collect()  # 68,639 samples
+
+len(set(current_samples_v3) - set(v31_release_samples)) # 1,655
+
+"""
+
+#%%
+
 tsv_paths = hl.hadoop_ls("gs://gnomad-bw2/gnomad_v3_1_readviz_tsvs")
 
 #%%

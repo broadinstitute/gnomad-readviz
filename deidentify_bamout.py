@@ -233,8 +233,8 @@ def generate_deidentified_bam(sample_id, input_bam_path, tsv_record_iterator, ts
             chrom, pos, ref, alt, zygosity_number, qual = record
 
             if tsv_records_to_skip and record in tsv_records_to_skip:
-                logging.info(" ".join(map(str, ["Skipping", chrom, pos, ref, alt, zygosity_number, qual],
-                    f"since it's in the list of {len(tsv_records_to_skip)} records to skip")))
+                logging.info(" ".join(map(str, ["Skipping", chrom, pos, ref, alt, zygosity_number, qual])) +
+                    f" since it's in the list of {len(tsv_records_to_skip)} records to skip")
                 continue
 
             if chrom != prev_chrom:

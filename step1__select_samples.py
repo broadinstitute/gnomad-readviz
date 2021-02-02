@@ -132,7 +132,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output-ht-path",
         help="Path for output hail table",
-        required=True,
+        default="gs://gnomad-bw2/gnomad_v3_readviz_crams__that_failed_AB_filter.ht",
+        #default="gs://gnomad-bw2/gnomad_v3_1_readviz_crams__that_failed_AB_filter.ht",
     )
     args = parser.parse_args()
 

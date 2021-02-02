@@ -1,0 +1,1 @@
+python3 step8__combine_deidentified_bamouts.py tsvs/cram_and_tsv_paths_table_v3_and_v31_with_exclude_variants.tsv --cluster
