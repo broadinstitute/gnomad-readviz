@@ -17,6 +17,8 @@ from batch import batch_utils
 logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+hl.init(log='/dev/null')
+
 GCLOUD_PROJECT = "broad-mpg-gnomad"
 GCLOUD_USER_ACCOUNT = "weisburd@broadinstitute.org"
 GCLOUD_CREDENTIALS_LOCATION = "gs://weisburd-misc/creds"
@@ -27,7 +29,7 @@ DOCKER_IMAGE = "gcr.io/broad-mpg-gnomad/gnomad-readviz@sha256:7013fc57e3471617a3
 INPUT_BAM_BUCKET = "gs://gnomad-bw2/gnomad_all_readviz_bamout_deidentified_v3_and_v31_fixed__20210101"
 
 #OUTPUT_BUCKET = "gs://gnomad-bw2/gnomad_all_combined_bamout"
-OUTPUT_BUCKET =  "gs://gnomad-bw2/gnomad_all_combined_bamout_deidentified_v3_and_v31_fixed__20210101"
+OUTPUT_BUCKET = "gs://gnomad-bw2/gnomad_all_combined_bamout_deidentified_v3_and_v31_fixed__20210101"
 
 DEFAULT_GROUP_SIZE = 50
 ALL_CHROMOSOMES = [str(c) for c in range(1, 23)] + ["X", "Y", "M"]
@@ -50,7 +52,7 @@ def parse_args():
     return p, args
 
 
-def add_command_to_combine_dbs(j, output_db_filename, input_db_paths, select_chrom=None, set_combined_bamout_id=None, create_index=False):
+def add_command_to_combine_dbs(j, output_db_filename, input_db_paths, select_chrom=None, set_combined_bamout_id=None, create_index=False, temp_dir="./temp"):
 
     sqlite_queries = []
     sqlite_queries.append('CREATE TABLE "variants" ('
@@ -85,12 +87,16 @@ def add_command_to_combine_dbs(j, output_db_filename, input_db_paths, select_chr
     sqlite_queries = "\n".join(sqlite_queries)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    sqlite_queries_filename = f"sqlite_queries__{output_db_filename}__merge_{len(input_db_paths)}_dbs__{timestamp}.sql"
-    sqlite_queries_temp_google_bucket_path = f"gs://gnomad-bw2/temp/{sqlite_queries_filename}"
+    if not os.path.isdir(temp_dir):
+        os.mkdir(temp_dir)
+
+    sqlite_queries_filename = os.path.join(os.path.normpath(temp_dir), f"sqlite_queries__{output_db_filename}__merge_{len(input_db_paths)}_dbs__{timestamp}.sql")
     with open(sqlite_queries_filename, "wt") as f:
         f.write(sqlite_queries)
 
-    os.system(f"gsutil -m cp {sqlite_queries_filename} {sqlite_queries_temp_google_bucket_path}")
+    sqlite_queries_temp_google_bucket_path = os.path.join(f"gs://gnomad-bw2/", sqlite_queries_filename)
+    #hl.hadoop_copy(sqlite_queries_filename, sqlite_queries_temp_google_bucket_path)
+
     local_sqlite_queries_file_path = batch_utils.localize_file(j, sqlite_queries_temp_google_bucket_path)
 
     j.command(f"""echo --------------
@@ -134,19 +140,28 @@ def combine_bam_files_in_group(args, batch, combined_bamout_id, group, input_bam
     j = batch_utils.init_job(batch, f"combine bams (cpu: {cpu}): {combined_bamout_id}", DOCKER_IMAGE if not args.raw else None, cpu)
     batch_utils.switch_gcloud_auth_to_user_account(j, GCLOUD_CREDENTIALS_LOCATION, GCLOUD_USER_ACCOUNT)
 
+    for_loop_bam_list = ""
     picard_merge_bam_inputs = ""
     for _, row in group.iterrows():
         local_input_bam_path = batch_utils.localize_file(j, f"{INPUT_BAM_BUCKET}/{row.sample_id}.deidentify_output.sorted.bam", use_gcsfuse=True)
-        local_input_bai_path = batch_utils.localize_file(j, f"{INPUT_BAM_BUCKET}/{row.sample_id}.deidentify_output.sorted.bam.bai", use_gcsfuse=True)
-        picard_merge_bam_inputs += f" -I {local_input_bam_path} "
+        #local_input_bai_path = batch_utils.localize_file(j, f"{INPUT_BAM_BUCKET}/{row.sample_id}.deidentify_output.sorted.bam.bai", use_gcsfuse=True)
+        for_loop_bam_list += f" '{local_input_bam_path}'"
+        picard_merge_bam_inputs += f" -I '{os.path.basename(local_input_bam_path).replace(' ', '_').replace(':', '_')}' "
 
     j.command(f"""echo --------------
 
 echo "Start - time: $(date)"
 df -kh
 
+# create symlinks to make the filenames shorter, so the merge command doesn't get too long 
+for p in {for_loop_bam_list};
+do
+    ln -s "${{p}}" $(basename "${{p}}" | sed "s/ /_/g" |  sed "s/:/_/g")
+done
+
 ls -lh
 
+# run the merge command
 java -jar /gatk/gatk.jar MergeSamFiles --VALIDATION_STRINGENCY SILENT --ASSUME_SORTED --CREATE_INDEX {picard_merge_bam_inputs} -O {combined_bamout_id}.bam
 gsutil -m cp {combined_bamout_id}.bam {combined_bamout_id}.bai {args.output_dir}/
 
@@ -163,7 +178,8 @@ def combine_db_files_in_group_for_chrom(
     group,
     chrom_to_combine_db_jobs,
     input_db_size_dict,
-    existing_combined_dbs):
+    existing_combined_dbs,
+    temp_dir="./temp"):
 
     # check how much disk will be needed
     try:
@@ -206,13 +222,14 @@ def combine_db_files_in_group_for_chrom(
             local_input_db_paths,
             select_chrom=chrom,
             set_combined_bamout_id=combined_bamout_id,
-            create_index=False)
+            create_index=False,
+            temp_dir=temp_dir)
         j2.command(f"gsutil -m cp {combined_db_filename} {args.output_dir}/")
 
     return 0
 
 
-def combine_all_dbs_for_chrom(args, batch, output_filename_prefix, chrom_to_combined_db_paths, chrom_to_combine_db_jobs):
+def combine_all_dbs_for_chrom(args, batch, output_filename_prefix, chrom_to_combined_db_paths, chrom_to_combine_db_jobs, temp_dir="./temp"):
     for chrom, combined_db_paths in chrom_to_combined_db_paths.items():
         output_filename = f"all_variants_{output_filename_prefix}.chr{chrom}.db"
         combine_db_jobs = chrom_to_combine_db_jobs[chrom]
@@ -235,7 +252,8 @@ def combine_all_dbs_for_chrom(args, batch, output_filename_prefix, chrom_to_comb
             local_input_db_paths,
             select_chrom=None,
             set_combined_bamout_id=None,
-            create_index=True)
+            create_index=True,
+            temp_dir=temp_dir)
         j3.command(f"gsutil -m cp {output_filename} {args.output_dir}/")
 
         for j2 in combine_db_jobs:
@@ -266,19 +284,19 @@ def main():
     batch_utils.set_gcloud_project(GCLOUD_PROJECT)
 
     if not args.skip_step1:
-        existing_combined_bamout_bams = subprocess.check_output(f"gsutil ls {OUTPUT_BUCKET}/*.bam", shell=True, encoding="UTF-8").strip().split("\n")
+        existing_combined_bamout_bams = batch_utils.generate_path_to_file_size_dict(f"{OUTPUT_BUCKET}/*.bam")
         input_bam_size_dict = batch_utils.generate_path_to_file_size_dict(f"{INPUT_BAM_BUCKET}/*.deidentify_output.sorted.bam")
 
     if not args.skip_step2:
-        existing_combined_dbs = subprocess.check_output(f"gsutil ls {OUTPUT_BUCKET}/*.chr*.db", shell=True, encoding="UTF-8").strip().split("\n")
+        existing_combined_dbs = batch_utils.generate_path_to_file_size_dict(f"{OUTPUT_BUCKET}/*.chr*.db")
         input_db_size_dict = batch_utils.generate_path_to_file_size_dict(f"{INPUT_BAM_BUCKET}/*.deidentify_output.db")
 
     # process groups
-    hl.init(log="/dev/null")
     with batch_utils.run_batch(args, batch_name=f"combine readviz bams: {len(groups)} group(s) (gs{args.group_size}_gn{num_groups}__s{len(df)})") as batch:
         chrom_to_combine_db_jobs = collections.defaultdict(list)
         chrom_to_combined_db_paths = collections.defaultdict(list)
         errors = 0
+        temp_dir = "./temp_sql_files__combine_group"
         for i, group in enumerate(tqdm.tqdm(groups, unit=" groups")):
             md5_hash = hashlib.md5(", ".join(sorted(list(group.sample_id))).encode('utf-8')).hexdigest()
             combined_bamout_id = f"s{len(df)}_gs{args.group_size}_gn{num_groups}_gi{i:04d}_h{md5_hash[-9:]}"
@@ -290,11 +308,16 @@ def main():
                 errors += combine_bam_files_in_group(args, batch, combined_bamout_id, group, input_bam_size_dict, existing_combined_bamout_bams)
 
             if not args.skip_step2:
-                errors += combine_db_files_in_group_for_chrom(args, batch, combined_bamout_id, group, chrom_to_combine_db_jobs, input_db_size_dict, existing_combined_dbs)
+                errors += combine_db_files_in_group_for_chrom(args, batch, combined_bamout_id, group, chrom_to_combine_db_jobs, input_db_size_dict, existing_combined_dbs, temp_dir=temp_dir)
 
+        if not args.skip_step2:
+            os.system(f"gsutil -m cp -r {temp_dir} gs://gnomad-bw2/")
+
+        temp_dir = "./temp_sql_files__combine_all_per_chrom"
         if not args.skip_step3 and not args.num_groups_to_process and not errors:
             # only do this after processing all groups
-            combine_all_dbs_for_chrom(args, batch, f"s{len(df)}_gs{args.group_size}_gn{num_groups}", chrom_to_combined_db_paths, chrom_to_combine_db_jobs)
+            combine_all_dbs_for_chrom(args, batch, f"s{len(df)}_gs{args.group_size}_gn{num_groups}", chrom_to_combined_db_paths, chrom_to_combine_db_jobs, temp_dir=temp_dir)
+            os.system(f"gsutil -m cp -r {temp_dir} gs://gnomad-bw2/")
 
 
 if __name__ == "__main__":
