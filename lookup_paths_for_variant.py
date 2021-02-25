@@ -18,15 +18,15 @@ def run(command):
 def print_bam_paths(match):
     for sample_id in [m.S for m in match.samples_w_het_var][:3]:
         print(f"het sample: {sample_id}")
-        os.system(f"gsutil ls -l 'gs://gnomad-bw2/gnomad_all_readviz_bamout/{sample_id}*'")
+        os.system(f"gsutil ls -l 'gs://gnomad-readviz/v3_and_v3.1/per_sample_readviz_bamouts/{sample_id}*'")
         os.system(f"gsutil ls -l 'gs://gnomad-bw2/gnomad_all_readviz_bamout_deidentified/{sample_id}*'")
     for sample_id in [m.S for m in match.samples_w_hom_var][:3]:
         print(f"hom sample: {sample_id}")
-        os.system(f"gsutil ls -l 'gs://gnomad-bw2/gnomad_all_readviz_bamout/{sample_id}*'")
+        os.system(f"gsutil ls -l 'gs://gnomad-readviz/v3_and_v3.1/per_sample_readviz_bamouts/{sample_id}*'")
         os.system(f"gsutil ls -l 'gs://gnomad-bw2/gnomad_all_readviz_bamout_deidentified/{sample_id}*'")
     for sample_id in [m.S for m in match.samples_w_hemi_var][:3]:
         print(f"hemi sample: {sample_id}")
-        os.system(f"gsutil ls -l 'gs://gnomad-bw2/gnomad_all_readviz_bamout/{sample_id}*'")
+        os.system(f"gsutil ls -l 'gs://gnomad-readviz/v3_and_v3.1/per_sample_readviz_bamouts/{sample_id}*'")
         os.system(f"gsutil ls -l 'gs://gnomad-bw2/gnomad_all_readviz_bamout_deidentified/{sample_id}*'")
 
 hl.init(log="/dev/null")

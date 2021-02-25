@@ -26,7 +26,7 @@ release_sample_ids_gnomad_v3_1 = list(set(sample_ids_gnomad_v3_1) & set(release_
 
 #%%
 
-all_bamouts = subprocess.check_output("gsutil ls gs://gnomad-bw2/gnomad_all_readviz_bamout/*.bam", shell=True, encoding="UTF-8")
+all_bamouts = subprocess.check_output("gsutil ls gs://gnomad-readviz/v3_and_v3.1/per_sample_readviz_bamouts/*.bam", shell=True, encoding="UTF-8")
 all_bamouts = all_bamouts.strip().split("\n")
 
 #%%

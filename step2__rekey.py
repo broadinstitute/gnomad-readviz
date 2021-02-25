@@ -8,7 +8,6 @@ NUM_POSITION_BINS_PER_CHROM = 20000
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s: %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
 
-GNOMAD_V3_RELEASE_HT = "gs://gnomad-public-requester-pays/release/3.0/ht/genomes/gnomad.genomes.r3.0.sites.ht"
 
 def parse_args():
 	"""Parse command line args."""
@@ -21,14 +20,18 @@ def parse_args():
 	)
 	p.add_argument(
 		"-o", "--output-dir",
-		help="Path where the re-keyed hail table will be written. If not specified, output will be written to the same "
-			"directory as the input",
+		help="Path where the re-keyed hail table will be written. If not specified, output will be written to the same directory as the input",
 	)
 	p.add_argument(
 		"--remove-AC0-variants",
-		help="Whether to filter out gnomADv3 AC0 variants. This flag should be used when the input ht contains"
-			"only gnomADv3 samples",
+		help="Whether to filter out gnomADv3 AC0 variants. This flag should be used when the input ht contains only gnomADv3 samples",
 		type=bool,
+	)
+	p.add_argument(
+		"--variants-ht",
+		help="Required if --remove-AC0-variants is used. This is the final released hail table of variants - used to look up which variants ended up being AC0 after QC",
+		action="store_true",
+		default="gs://gnomad-public-requester-pays/release/3.0/ht/genomes/gnomad.genomes.r3.0.sites.ht",
 	)
 	p.add_argument(
 		"-p", "--output-partitions",
@@ -47,9 +50,9 @@ def parse_args():
 	return args
 
 
-def remove_AC0_variants(ht):
+def remove_AC0_variants(ht, variants_ht):
 	"""Removes all variants from ht that are AC=0 in the gnomAD public release"""
-	gnomad_ht = hl.read_table(GNOMAD_V3_RELEASE_HT)
+	gnomad_ht = hl.read_table(variants_ht)
 	gnomad_ht_AC0 = gnomad_ht.filter(gnomad_ht.freq.AC[gnomad_ht.globals.freq_index_dict['adj']] == 0, keep=True)
 
 	ht = ht.anti_join(gnomad_ht_AC0)  # remove AC0 variants
@@ -121,7 +124,9 @@ def main():
 	ht = hl.read_table(args.input_ht)
 
 	if args.remove_AC0_variants:
-		ht = remove_AC0_variants(ht)
+		if not args.variants_ht:
+			raise ValueError("--variants-ht must be specified when --remove-AC0-variants flag is used")
+		ht = remove_AC0_variants(ht, args.variants_ht)
 
 	ht_keyed_by_position_bin = rekey_by_position_bin(ht)
 	ht_keyed_by_position_bin.write(
