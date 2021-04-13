@@ -5,7 +5,7 @@ For each variant, select the ~10 sample ids to use for readviz tracks for each g
 Output a hail table that lists these sample ids for each variant.  
   
 **Inputs**:  
-- `gs://gnomad/metadata/genomes_v3.1/gnomad_v3.1_sample_qc_metadata.ht` - sample metadata used for filtering for samples that are release and have crams, and for sample sex. 
+- `gs://gnomad/metadata/genomes_v3.1/gnomad_v3.1_sample_qc_metadata.ht` - sample metadata used for selecting samples that have crams available and are `release=True`. Also, it's used to get sample sex to determine which genotypes are `hemi`.
 - `gs://gnomad/raw/genomes/3.1/gnomad_v3.1_sparse_unsplit.repartitioned.mt` - matrix table with genotypes
 
 **Outputs**:
