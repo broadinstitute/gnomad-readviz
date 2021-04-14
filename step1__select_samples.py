@@ -83,18 +83,29 @@ def main(args):
     logger.info(
         f"Taking up to {args.num_samples} samples per site where samples are het, hom_var, or hemi"
     )
+
+    def sample_ordering_expr(mt):
+        """It can be problematic for downstream steps when several samples have many times more variants selected
+        than in other samples. To avoid this, and distribute variants more evenly across samples,
+        add a random number as the secondary sort order. This way, when many samples have an identically high GQ
+        (as often happens for common variants), the same few samples don't get selected repeatedly for all common
+        variants.
+        """
+
+        return -mt.GQ, hl.rand_unif(0, 1, seed=1)
+
     mt = mt.annotate_rows(
         samples_w_het_var=hl.agg.filter(
             het_expr(mt),
-            hl.agg.take(het_hom_hemi_take_expr(mt), args.num_samples, ordering=-mt.GQ),
+            hl.agg.take(het_hom_hemi_take_expr(mt), args.num_samples, ordering=sample_ordering_expr(mt)),
         ),
         samples_w_hom_var=hl.agg.filter(
             hom_expr(mt),
-            hl.agg.take(het_hom_hemi_take_expr(mt), args.num_samples, ordering=-mt.GQ),
+            hl.agg.take(het_hom_hemi_take_expr(mt), args.num_samples, ordering=sample_ordering_expr(mt)),
         ),
         samples_w_hemi_var=hl.agg.filter(
             hemi_expr(mt),
-            hl.agg.take(het_hom_hemi_take_expr(mt), args.num_samples, ordering=-mt.GQ),
+            hl.agg.take(het_hom_hemi_take_expr(mt), args.num_samples, ordering=sample_ordering_expr(mt)),
         ),
     )
 
@@ -134,7 +145,6 @@ if __name__ == "__main__":
         help="Path for output hail table",
         default="gs://gnomad-readviz/v3_and_v3.1/gnomad_v3_1_readviz_crams.ht",
         #default="gs://gnomad/readviz/genomes_v3/gnomad_v3_readviz_crams.ht",
-        #
     )
     args = parser.parse_args()
 
