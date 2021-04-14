@@ -1,7 +1,8 @@
 ###  Readviz Pipeline
 
+#### Overview
 
-The pipeline steps consist of 8 steps whose purpose is as follows:
+The pipeline has 8 steps:
 
 **steps 1, 2, 3**: Do sample selection for each variant - specifically, take genotypes and metadata from the variant callset and generate one .tsv file per-sample which lists the variants for which that sample will provide a read visualization.  
 These 3 steps are implemented as hail scripts, intended to run on a dataproc cluster.
