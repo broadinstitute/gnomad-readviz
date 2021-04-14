@@ -5,7 +5,7 @@
 
 The pipeline has 8 steps. The core logic is in the *stepN_..py* files. For many steps there are also *run_stepN_..sh* files with example shell commands for running that step.
 
-**steps 1, 2, 3**: Do sample selection for each variant - specifically, take genotypes and metadata from the variant callset and generate one .tsv file per-sample which lists the variants for which that sample will provide a read visualization.  
+**steps 1, 2, 3**: Do sample selection for each variant - specifically, take genotypes and metadata from the variant callset and generate one .tsv file per-sample. This .tsv file lists the variants for which that sample will provide a read visualization.  
 These 3 steps are implemented as hail scripts, intended to run on a dataproc cluster.
 There are 3 steps instead of 1 because they require different dataproc cluster shapes: step1 is more like the typical hail pipeline and can run on auto-scaled preemptible nodes, step2 is mainly doing a rekey operation with a large shuffle and so runs better on higher-mem machines without auto-scaling, and step3 is just writing out thousands of .tsvs which hail currently doesn't parallelize, so this step is split across very many small hail clusters as a work-around. 
 
