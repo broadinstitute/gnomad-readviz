@@ -78,7 +78,7 @@ To prepare for writing out per-sample .tsvs, rekey the hail table from step1 to 
 ----
 #### step3: export per-sample tsvs
 Takes the keyed-by-sample hail table output in step 2, and writes out a tsv for each sample, containing the list of 
-variants that will be used for readviz from that sample. Split across multiple hail clusters (see `run_step3__export_per_sample_tsvs.sh`)
+variants that will be used for readviz from that sample. hail currently doesn't parallelize, so this step is split across very many small hail clusters as a work-around (see `run_step3__export_per_sample_tsvs.sh`).
 
 ----
 #### step4: generate tsv of cram paths
