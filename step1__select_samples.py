@@ -85,11 +85,12 @@ def main(args):
     )
 
     def sample_ordering_expr(mt):
-        # It can be problematic for downstream steps when several samples have many times more variants selected
-        # than in other samples. To avoid this, and distribute variants more evenly across samples,
-        # add a random number as the secondary sort order. This way, when many samples have an identically high GQ
-        # (as often happens for common variants), the same few samples don't get selected repeatedly for all common
-        # variants.
+        """It can be problematic for downstream steps when several samples have many times more variants selected
+        than in other samples. To avoid this, and distribute variants more evenly across samples,
+        add a random number as the secondary sort order. This way, when many samples have an identically high GQ
+        (as often happens for common variants), the same few samples don't get selected repeatedly for all common
+        variants.
+        """
 
         return -mt.GQ, hl.rand_unif(0, 1, seed=1)
 
