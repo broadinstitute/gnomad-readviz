@@ -2,14 +2,15 @@
 
 #### Overview
 
-The pipeline has 8 steps:
+
+The pipeline has 8 steps. The core logic is in the *stepN_..py* files. For many steps there are also *run_stepN_..sh* files with example shell commands for running that step.
 
 **steps 1, 2, 3**: Do sample selection for each variant - specifically, take genotypes and metadata from the variant callset and generate one .tsv file per-sample which lists the variants for which that sample will provide a read visualization.  
 These 3 steps are implemented as hail scripts, intended to run on a dataproc cluster.
 
 **step 4**: Generate a single .tsv file with 1 row per sample, listing the .tsv path from step3 as well as the .cram path. This is a python script intended to run on your laptop. 
 
-**step 5**: Actually run GATK HaplotypeCaller with `--bamout` on each sample to generate a per-sample .bam file with realigned reads. Use -L to restrict HaplotypeCaller to small windows around the variants selected for this sample in steps 1-3.
+**step 5**: Actually run GATK HaplotypeCaller with `--bamout` on each sample to generate a per-sample .bam file with realigned reads. Use -L to restrict HaplotypeCaller to small windows around the variants selected for this sample in steps 1-3. This can be run as a Batch pipeline, or on Terra using a .wdl
 
 **step 6**: Similar to step 4 - generates another metadata .tsv, this time with .bamout paths instead of .cram paths. 
 
