@@ -115,12 +115,12 @@ is being reprocessed to strip metadata, readgroup names, etc.
 NOTE: The `#%%` in the code allow this to be run as an interactive notebook when using IntelliJ Scientific Mode
 
 ----
-#### step7  deidentify bamouts
+#### step7: deidentify bamouts
 
 This is another Batch pipeline that takes each bamout from step5 and runs the [deidentify_bamout.py](https://github.com/broadinstitute/gnomad-readviz/blob/master/deidentify_bamout.py) script on it. The script removes extraneous or sensitive metadata, obfuscates and downsize read names, and discards all read tags except an opaque read group which is unique for this variant and sample. 
 
 ----
-#### step8  combine deidentified bamouts
+#### step8: combine deidentified bamouts
    
 This is the last Batch pipeline - it pancakes the single-sample deidentified bams from step7 into bams with many (currently 50) samples, so that it's not possible to tell which variant came from which sample. Also, it combines the per-sample sqlite databases from step7 into 1 database per chromosome. Both the output bams and sqlite databases can be made public, and are directly accessed by the gnomAD browser.
 
