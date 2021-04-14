@@ -41,10 +41,12 @@ Output a hail table that lists these sample ids for each variant.
 - `gs://gnomad-readviz/v3_and_v3.1/gnomad_v3_1_readviz_crams_exploded_with_key.ht/` - intermediate checkpoint file
 - `gs://gnomad-readviz/v3_and_v3.1/gnomad_v3_1_readviz_crams_exploded_keyed_by_sample.ht/` 
 
+----
 #### step3: export per-sample tsvs
 Takes the keyed-by-sample hail table output in step 2, and writes out a tsv for each sample, containing the list of 
 variants that will be used for readviz from that sample. Split across multiple hail clusters (see `run_step3__export_per_sample_tsvs.sh`)
 
+----
 #### step4: generate tsv of cram paths
 To prepare for downstream steps, generate a single .tsv with 1 row per sample containing the paths of that sample's cram and tsv file (from step3).
 The column names are:
@@ -54,6 +56,7 @@ sample_id 	variants_tsv_bgz	cram_path	  crai_path
 
 NOTE: The `#%%` in the code allow this to be run as an interactive notebook when using IntelliJ Scientific Mode
 
+----
 #### step5: run haplotype caller per sample
 This is the step that actually runs haplotype caller to generate a bamout for each sample, using an interval list with small windows around the variants selected for that sample. The step5 python file is a Batch pipeline. It uses the docker image built from `docker/Dockerfile` by running `cd docker; make all`. 
 Instead of using this Batch pipeline, step5 can also be done on Terra (for convenience or cost reasons, depending on how Batch and Terra pricing evolves). For the Terra/cromwell pipeline, there's a .wdl in `terra/wdl/GetReadVizData.wdl`. 
@@ -61,6 +64,7 @@ Both the Batch pipeline and Terra take the .tsv generated in step4 to determine 
 
 **NOTE:** it can be important to update the docker image and pipeline to use the same GATK version and HaplotypeCaller arguments that were used to generate the variant callset. I typically check the HaplotypeCaller version in a gvcf header, and double-check with whoever generated the callset that there weren't any unusual non-default HaplotypeCaller args used. 
 
+----
 #### step6: subset tsv to successful bamouts
 
 Like step4, this step interactively generates a single tsv with per-sample file paths to pass into steps 7 & 8. 
@@ -77,10 +81,12 @@ is being reprocessed to strip metadata, readgroup names, etc.
 
 NOTE: The `#%%` in the code allow this to be run as an interactive notebook when using IntelliJ Scientific Mode
 
+----
 #### step7  deidentify bamouts
 
 This is another Batch pipeline that takes each bamout from step5 and runs the [deidentify_bamout.py](https://github.com/broadinstitute/gnomad-readviz/blob/master/deidentify_bamout.py) script on it. The script removes extraneous or sensitive metadata, obfuscates and downsize read names, and discards all read tags except an opaque read group which is unique for this variant and sample. 
 
+----
 #### step8  combine deidentified bamouts
    
 This is the last Batch pipeline - it pancakes the single-sample deidentified bams from step7 into bams with many (currently 50) samples, so that it's not possible to tell which variant came from which sample. Also, it combines the per-sample sqlite databases from step7 into 1 database per chromosome. Both the output bams and sqlite databases can be made public, and are directly accessed by the gnomAD browser.
