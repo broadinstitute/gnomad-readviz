@@ -65,7 +65,7 @@ RUN wget https://github.com/samtools/samtools/releases/download/${SAMTOOLS_VERSI
 RUN samtools --version
 
 COPY --from=broadinstitute/gatk:4.0.10.1 /gatk/gatk-package-4.0.10.1-local.jar /gatk/gatk.jar
-RUN java -jar /gatk/gatk.jar --version
+RUN java -jar /gatk/gatk.jar
 
 COPY --from=us.gcr.io/broad-gotc-prod/genomes-in-the-cloud:2.3.2-1510681135 /usr/gitc/GATK35.jar /gatk/GATK35.jar
 RUN java -jar /gatk/GATK35.jar --version
