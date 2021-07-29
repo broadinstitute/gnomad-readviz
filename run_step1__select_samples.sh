@@ -10,7 +10,6 @@ hailctl dataproc start \
 	readviz-select-samples
 
 hailctl dataproc submit \
-	--pyfiles="/Users/weisburd/code/gnomad_qc/gnomad_qc,/Users/weisburd/code/gnomad_methods/gnomad" \
 	readviz-select-samples \
 	step1__select_samples.py \
 	--meta-table-ht gs://gnomad/metadata/genomes_v3.1/gnomad_v3.1_sample_qc_metadata.ht \
