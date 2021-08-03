@@ -1,8 +1,6 @@
 import asyncio
 import argparse
 import logging
-import os
-from typing import Dict, List
 
 import hailtop.batch as hb
 import hail as hl
