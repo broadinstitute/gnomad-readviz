@@ -4,7 +4,7 @@ import logging
 import hail as hl
 
 from gnomad.resources.resource_utils import DataException
-from gnomad.utils.file_utils import call_parallel_file_exists
+from gnomad.utils.file_utils import parallel_file_exists
 
 from .utils import get_sample_ids
 
@@ -25,7 +25,7 @@ def main(args):
     sample_ids = get_sample_ids(args.ids_file)
 
     tsvs = [f"{output_bucket}/{sample}.tsv.bgz" for sample in sample_ids]
-    tsv_files_exist = call_parallel_file_exists(tsvs)
+    tsv_files_exist = parallel_file_exists(tsvs)
 
     logger.info("Starting cram existence checks...")
     cram_map = {}
@@ -33,7 +33,7 @@ def main(args):
         for line in c:
             sample, cram = line.strip().split("\t")
             cram_map[sample] = cram
-    cram_files_exist = call_parallel_file_exists(list(cram_map.values()))
+    cram_files_exist = parallel_file_exists(list(cram_map.values()))
 
     logger.info("Starting to write to output TSV...")
     with hl.hadoop_open(args.cram_map) as s, hl.hadoop_open(

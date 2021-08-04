@@ -4,7 +4,7 @@ import logging
 import hailtop.batch as hb
 import hail as hl
 
-from gnomad.utils.file_utils import call_parallel_file_exists
+from gnomad.utils.file_utils import parallel_file_exists
 
 from .utils import get_sample_ids
 
@@ -51,7 +51,7 @@ def main(args):
     logger.info("Preparing to start batch job...")
     output_bucket = args.output_bucket
     files = [f"{output_bucket}/{sample}_success.txt" for sample in sample_ids]
-    file_exists = call_parallel_file_exists(files)
+    file_exists = parallel_file_exists(files)
 
     for sample in sample_ids:
         logger.info("Working on %s", sample)
