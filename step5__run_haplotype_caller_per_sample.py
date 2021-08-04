@@ -118,25 +118,24 @@ def main():
 
     # Process samples
     with run_batch(args, batch_name=f"HaplotypeCaller -bamout") as batch:
-        for _ in tqdm(range(len(samples)), desc="submit HC batch job for samples",):
-            for sample in samples_without_bams:
-                cram, crai, variants_tsv_bgz, bam, bai = samples[sample]
+        for sample in tqdm(samples_without_bams, unit="samples"):
+            cram, crai, variants_tsv_bgz, bam, bai = samples[sample]
 
-                j = init_job(
-                    batch, f"readviz: {sample}", docker_image, args.cpu, args.memory,
-                )
-                j.command(
-                    f"""gcloud -q auth activate-service-account --key-file=/gsa-key/key.json"""
-                )
-                local_exclude_intervals = localize_file(j, EXCLUDE_INTERVALS)
-                local_fasta = localize_file(j, HG38_REF_PATHS.fasta, use_gcsfuse=True)
-                local_fasta_fai = localize_file(j, HG38_REF_PATHS.fai, use_gcsfuse=True)
-                localize_file(j, HG38_REF_PATHS.dict, use_gcsfuse=True)
-                local_tsv_bgz = localize_file(j, variants_tsv_bgz)
-                local_cram_path = localize_file(j, cram)
+            j = init_job(
+                batch, f"readviz: {sample}", docker_image, args.cpu, args.memory,
+            )
+            j.command(
+                f"""gcloud -q auth activate-service-account --key-file=/gsa-key/key.json"""
+            )
+            local_exclude_intervals = localize_file(j, EXCLUDE_INTERVALS)
+            local_fasta = localize_file(j, HG38_REF_PATHS.fasta, use_gcsfuse=True)
+            local_fasta_fai = localize_file(j, HG38_REF_PATHS.fai, use_gcsfuse=True)
+            localize_file(j, HG38_REF_PATHS.dict, use_gcsfuse=True)
+            local_tsv_bgz = localize_file(j, variants_tsv_bgz)
+            local_cram_path = localize_file(j, cram)
 
-                j.command(
-                    f"""echo --------------
+            j.command(
+                f"""echo --------------
 
 echo "Start - time: $(date)"
 df -kh
@@ -193,7 +192,7 @@ ls -lh
 echo --------------; free -h; df -kh; uptime; set +xe; echo "Done - time: $(date)"; echo --------------
 
 """
-                )
+            )
 
 
 if __name__ == "__main__":
