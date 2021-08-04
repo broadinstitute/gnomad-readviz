@@ -4,7 +4,7 @@ from tqdm import tqdm
 import hail as hl
 
 from gnomad.resources.resource_utils import DataException
-from gnomad.utils.file_utils import call_parallel_file_exists
+from gnomad.utils.file_utils import parallel_file_exists
 
 from tgg.batch.batch_utils import (
     check_storage_bucket_region,
@@ -109,7 +109,7 @@ def main():
             check_storage_bucket_region(cram)
 
     logger.info("Checking if any output bams already exist...")
-    bam_files_exist = call_parallel_file_exists(list(bams.values()))
+    bam_files_exist = parallel_file_exists(list(bams.values()))
 
     samples_without_bams = []
     for sample in bams:
