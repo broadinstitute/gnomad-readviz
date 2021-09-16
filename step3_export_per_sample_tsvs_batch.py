@@ -6,7 +6,7 @@ import hail as hl
 
 from gnomad.utils.file_utils import parallel_file_exists
 
-from .utils import get_sample_ids
+from utils import get_sample_ids
 
 logging.basicConfig(format="%(levelname)s (%(name)s %(lineno)s): %(message)s")
 logger = logging.getLogger("run_per_sample_tsv_export")
@@ -88,7 +88,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--python-image",
         help="Docker image to use. Must have python and dill installed.",
-        default="gcr.io/broad-mpg-gnomad/tgg-methods-vm:20210623",
+        default="gcr.io/broad-mpg-gnomad/tgg-methods-vm:20210915",
     )
     parser.add_argument("--ids-file", help="File with sample IDs")
     parser.add_argument(

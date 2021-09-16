@@ -6,7 +6,7 @@ import hail as hl
 from gnomad.resources.resource_utils import DataException
 from gnomad.utils.file_utils import parallel_file_exists
 
-from .utils import get_sample_ids
+from utils import get_sample_ids
 
 logging.basicConfig(format="%(levelname)s (%(name)s %(lineno)s): %(message)s")
 logger = logging.getLogger("get_tsv_for_haplotype_caller")
