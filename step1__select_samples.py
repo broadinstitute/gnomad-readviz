@@ -42,15 +42,15 @@ def main(args):
     meta_ht = meta_ht.repartition(1000)
     meta_ht = meta_ht.checkpoint(re.sub(".tsv(.b?gz)?", "") + ".ht", overwrite=True, _read_if_exists=True)
 
-    vds = get_gnomad_v4_vds(split=True, release_only=True)
+    # No need to 'remove_dead_alleles' with 'split' and filter to non ref.
+    vds = get_gnomad_v4_vds(split=True, release_only=True, remove_dead_alleles=False)
 
     # see https://github.com/broadinstitute/ukbb_qc/pull/227/files
     if args.test:
         logger.info("Filtering to chrX PAR1 boundary: chrX:2781477-2781900")
         vds = hl.vds.filter_intervals(vds, [hl.parse_locus_interval("chrX:2781477-2781900")])
 
-    mt = hl.vds.to_dense_mt(vds)
-
+    mt = vds.variant_data
     meta_join = meta_ht[mt.s]
     mt = mt.annotate_cols(
         meta=hl.struct(
@@ -75,7 +75,6 @@ def main(args):
     logger.info("Filtering to entries meeting GQ, DP and other 'adj' thresholds")
     mt = filter_to_adj(mt)
     mt = mt.filter_rows(hl.agg.any(mt.GT.is_non_ref()))
-    mt = mt.filter_rows(hl.len(mt.alleles) > 1)
 
     logger.info(
         f"Taking up to {args.num_samples} samples per site where samples are het, hom_var, or hemi"
