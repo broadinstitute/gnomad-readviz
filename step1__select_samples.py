@@ -1,9 +1,10 @@
 import argparse
 import logging
 import hail as hl
-from gnomad.resources import MatrixTableResource
+import re
 from gnomad.sample_qc.sex import adjusted_sex_ploidy_expr
 from gnomad.utils.filtering import filter_to_adj
+from gnomad_qc.v4.resources.basics import get_gnomad_v4_vds
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,33 +36,29 @@ def hemi_expr(mt):
 
 def main(args):
 
-    hl.init(log="/select_samples", default_reference="GRCh38")
-    meta_ht = hl.read_table(args.sample_metadata_ht)
-    meta_ht = meta_ht.filter(meta_ht.release & hl.is_defined(meta_ht.project_meta.cram_path))
-    meta_ht = meta_ht.select(
-        cram_path=meta_ht.project_meta.cram_path,
-        crai_path=meta_ht.project_meta.cram_path.replace(".cram", ".cram.crai"),
-        sex=meta_ht.project_meta.sex,
-    )
+    hl.init(log="/select_samples", default_reference="GRCh38", idempotent=True)
+    meta_ht = hl.import_table(args.sample_metadata_tsv, force_bgz=True)
+    meta_ht = meta_ht.key_by("s")
+    meta_ht = meta_ht.repartition(1000)
+    meta_ht = meta_ht.checkpoint(re.sub(".tsv(.b?gz)?", "") + ".ht", overwrite=True, _read_if_exists=True)
 
-    mt = MatrixTableResource(args.gnomad_mt).mt()
-    mt = hl.MatrixTable(hl.ir.MatrixKeyRowsBy(mt._mir, ['locus', 'alleles'], is_sorted=True))
+    vds = get_gnomad_v4_vds(split=True, release_only=True)
 
+    # see https://github.com/broadinstitute/ukbb_qc/pull/227/files
     if args.test:
         logger.info("Filtering to chrX PAR1 boundary: chrX:2781477-2781900")
-        mt = hl.filter_intervals(mt, [hl.parse_locus_interval("chrX:2781477-2781900")])
+        vds = hl.vds.filter_intervals(vds, [hl.parse_locus_interval("chrX:2781477-2781900")])
+
+    mt = hl.vds.to_dense_mt(vds)
 
     meta_join = meta_ht[mt.s]
     mt = mt.annotate_cols(
         meta=hl.struct(
-            sex=meta_join.sex,
+            sex=meta_join.sex_karyotype,
             cram=meta_join.cram_path,
             crai=meta_join.crai_path,
         )
     )
-    logger.info("Filtering to releasable samples with a defined cram path")
-    mt = mt.filter_cols(mt.meta.release & hl.is_defined(mt.meta.cram))
-    mt = hl.experimental.sparse_split_multi(mt, filter_changed_loci=True)
 
     logger.info("Adjusting samples' sex ploidy")
     mt = mt.annotate_entries(
@@ -131,19 +128,14 @@ if __name__ == "__main__":
         default=10,
     )
     parser.add_argument(
-        "--gnomad-mt",
-        help="Path of the full gnomAD matrix table with genotypes",
-        default="gs://gnomad/raw/genomes/3.1/gnomad_v3.1_sparse_unsplit.repartitioned.mt",
-    )
-    parser.add_argument(
-        "--sample-metadata-ht",
-        help="Path of the gnomAD sample metadata ht",
-        default="gs://gnomad/metadata/genomes_v3.1/gnomad_v3.1_sample_qc_metadata.ht",
+        "--sample-metadata-tsv",
+        help="Path of the gnomAD sample metadata TSV with columns: s, cram_path, crai_path, sex_karyotype",
+        default="gs://gnomad-readviz/v4.0/gnomad.exomes.v4.0.metadata.tsv.gz",
     )
     parser.add_argument(
         "--output-ht-path",
         help="Path for output hail table",
-        default="gs://gnomad-readviz/v3_and_v3.1/gnomad_v3_1_readviz_crams.ht",
+        default="gs://gnomad-readviz/v4.0/gnomad.exomes.v4.0.readviz_crams.ht",
         #default="gs://gnomad/readviz/genomes_v3/gnomad_v3_readviz_crams.ht",
     )
     args = parser.parse_args()
