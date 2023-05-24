@@ -30,7 +30,7 @@ def hom_expr(mt):
 def hemi_expr(mt):
     return hl.or_missing(
         mt.locus.in_x_nonpar() | mt.locus.in_y_nonpar(),
-        mt.GT.is_haploid() & (mt.meta.sex == "male") & (mt.GT[0] == 1),
+        mt.GT.is_haploid() & (mt.meta.sex_karyotype == "XY") & (mt.GT[0] == 1),
     )
 
 
@@ -40,7 +40,8 @@ def main(args):
     meta_ht = hl.import_table(args.sample_metadata_tsv, force_bgz=True)
     meta_ht = meta_ht.key_by("s")
     meta_ht = meta_ht.repartition(1000)
-    meta_ht = meta_ht.checkpoint(re.sub(".tsv(.b?gz)?", "") + ".ht", overwrite=True, _read_if_exists=True)
+    meta_ht = meta_ht.checkpoint(
+        re.sub(".tsv(.b?gz)?", "", args.sample_metadata_tsv) + ".ht", overwrite=True, _read_if_exists=True)
 
     # No need to 'remove_dead_alleles' with 'split' and filter to non ref.
     vds = get_gnomad_v4_vds(split=True, release_only=True, remove_dead_alleles=False)
@@ -54,7 +55,7 @@ def main(args):
     meta_join = meta_ht[mt.s]
     mt = mt.annotate_cols(
         meta=hl.struct(
-            sex=meta_join.sex_karyotype,
+            sex_karyotype=meta_join.sex_karyotype,
             cram=meta_join.cram_path,
             crai=meta_join.crai_path,
         )
@@ -65,7 +66,7 @@ def main(args):
         GT=adjusted_sex_ploidy_expr(
             mt.locus,
             mt.GT,
-            mt.meta.sex,
+            mt.meta.sex_karyotype,
             xy_karyotype_str="male",
             xx_karyotype_str="female",
         )
