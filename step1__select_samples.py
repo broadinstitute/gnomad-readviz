@@ -82,11 +82,16 @@ def main(args):
     )
 
     def sample_ordering_expr(mt):
-        """It can be problematic for downstream steps when several samples have many times more variants selected
-        than in other samples. To avoid this, and distribute variants more evenly across samples,
-        add a random number as the secondary sort order. This way, when many samples have an identically high GQ
-        (as often happens for common variants), the same few samples don't get selected repeatedly for all common
-        variants.
+        """For variants that are present in more than 10 samples (or whatever number args.num_samples is set to),
+        this sample ordering determines which samples will be used for readviz. Sorting first by GQ ensures that
+        samples with the highest genotype quality are shown. For common variants, many samples may have maximum GQ,
+        so if we only sort by GQ, the samples for these variants will, in practice, be chosen based on the
+        alphabetical order of their sample ids. This can be problematic because the same few samples would end up being
+        selected for most common variants, and so a disproportionate number of common variants would need read data from
+        these samples. One problem with would be an imbalance in computational load across samples during downstream
+        steps of the readviz pipeline - which would cause some shards to take much longer than others.
+        To avoid this, and distribute variants more evenly across samples, we add a random number as the second sort key
+        so that the choice of samples will be randomized for each common variant.
         """
 
         return -mt.GQ, hl.rand_unif(0, 1, seed=1)
@@ -119,7 +124,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--overwrite",
-        help="Overwrite if object already exists", action="store_true",
+        help="Overwrite if output file already exists", action="store_true",
     )
     parser.add_argument(
         "--num-samples",
