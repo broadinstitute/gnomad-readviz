@@ -4,7 +4,9 @@ import hail as hl
 import re
 from gnomad.sample_qc.sex import adjusted_sex_ploidy_expr
 from gnomad.utils.filtering import filter_to_adj
-from gnomad_qc.v4.resources.basics import get_gnomad_v4_vds
+from gnomad.utils.annotations import get_adj_expr
+from gnomad_qc.v4.resources.basics import gnomad_v4_genotypes
+from gnomad_qc.v4.resources.meta import meta
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,22 +38,26 @@ def hemi_expr(mt):
 
 def main(args):
 
-    hl.init(log="/select_samples", default_reference="GRCh38", idempotent=True)
+    hl.init(log="/select_samples", default_reference="GRCh38", idempotent=True, tmp_dir=args.temp_bucket)
     meta_ht = hl.import_table(args.sample_metadata_tsv, force_bgz=True)
     meta_ht = meta_ht.key_by("s")
+    meta_ht = meta_ht.filter(hl.is_defined(meta_ht.cram_path) & hl.is_defined(meta_ht.crai_path), keep=True)
     meta_ht = meta_ht.repartition(1000)
     meta_ht = meta_ht.checkpoint(
         re.sub(".tsv(.b?gz)?", "", args.sample_metadata_tsv) + ".ht", overwrite=True, _read_if_exists=True)
 
-    # No need to 'remove_dead_alleles' with 'split' and filter to non ref.
-    vds = get_gnomad_v4_vds(split=True, release_only=True, remove_dead_alleles=False)
+    vds = gnomad_v4_genotypes.vds()
 
     # see https://github.com/broadinstitute/ukbb_qc/pull/227/files
     if args.test:
         logger.info("Filtering to chrX PAR1 boundary: chrX:2781477-2781900")
         vds = hl.vds.filter_intervals(vds, [hl.parse_locus_interval("chrX:2781477-2781900")])
 
+    v4_qc_meta_ht = meta.ht()
+
     mt = vds.variant_data
+    mt = mt.filter_cols(v4_qc_meta_ht[mt.s].release)
+
     meta_join = meta_ht[mt.s]
     mt = mt.annotate_cols(
         meta=hl.struct(
@@ -62,24 +68,27 @@ def main(args):
     )
 
     logger.info("Adjusting samples' sex ploidy")
-    mt = mt.annotate_entries(
-        GT=adjusted_sex_ploidy_expr(
-            mt.locus,
-            mt.GT,
-            mt.meta.sex_karyotype,
-            xy_karyotype_str="male",
-            xx_karyotype_str="female",
-        )
+    lgt_expr = hl.if_else(
+        mt.locus.in_autosome(),
+        mt.LGT,
+        adjusted_sex_ploidy_expr(mt.locus, mt.LGT, mt.meta.sex_karyotype)
     )
-    mt = mt.select_entries("GT", "GQ", "DP", "AD")
+    mt = mt.select_entries(
+        "LA", "GQ", LGT=lgt_expr, adj=get_adj_expr(lgt_expr, mt.GQ, mt.DP, mt.LAD)
+    )
 
     logger.info("Filtering to entries meeting GQ, DP and other 'adj' thresholds")
     mt = filter_to_adj(mt)
+
+    logger.info("Performing sparse split multi")
+    mt = hl.experimental.sparse_split_multi(mt, filter_changed_loci=True)
+
+    logger.info("Filter variants with at least one non-ref GT")
     mt = mt.filter_rows(hl.agg.any(mt.GT.is_non_ref()))
 
-    logger.info(
-        f"Taking up to {args.num_samples} samples per site where samples are het, hom_var, or hemi"
-    )
+    #logger.info(f"Saving checkpoint")
+    #mt = mt.checkpoint(os.path.join(args.temp_bucket, "readviz_select_samples_checkpoint1.vds"),
+    #                   overwrite=True, _read_if_exists=True)
 
     def sample_ordering_expr(mt):
         """For variants that are present in more than 10 samples (or whatever number args.num_samples is set to),
@@ -96,6 +105,9 @@ def main(args):
 
         return -mt.GQ, hl.rand_unif(0, 1, seed=1)
 
+    logger.info(
+        f"Taking up to {args.num_samples} samples per site where samples are het, hom_var, or hemi"
+    )
     mt = mt.annotate_rows(
         samples_w_het_var=hl.agg.filter(
             het_expr(mt),
@@ -131,6 +143,11 @@ if __name__ == "__main__":
         type=int,
         help="Number of samples to take from each genotype category at each site",
         default=10,
+    )
+    parser.add_argument(
+        "--temp-bucket",
+        help="Bucket for intermediate files",
+        default="gs://bw2-delete-after-15-days",
     )
     parser.add_argument(
         "--sample-metadata-tsv",
