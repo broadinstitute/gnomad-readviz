@@ -1,9 +1,13 @@
-hailctl dataproc start --num-workers 2 \
-  --num-preemptible 30 \
-  --max-idle 30m \
+
+hailctl dataproc start \
+	--requester-pays-allow-all \
+	--no-off-heap-memory \
+  --num-workers 2 \
+  --num-preemptible-workers 30 \
+  --region us-central1 \
   --project broad-mpg-gnomad \
-  --init gs://gnomad-public/tools/inits/master-init.sh \
-  --packages slackclient==2.0.0,websocket-client,sklearn,statsmodels,scikit-learn,hdbscan \
+	--packages google-api-python-client,gnomad,"git+https://github.com/broadinstitute/gnomad_methods.git@main","git+https://github.com/broadinstitute/gnomad_qc.git@main" \
+  --max-idle 2h \
   --master-machine-type n1-highmem-8 \
   --worker-machine-type n1-highmem-4 \
   readviz-cluster-step2-rekey
