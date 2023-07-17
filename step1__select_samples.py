@@ -56,6 +56,8 @@ def main(args):
     v4_qc_meta_ht = meta.ht()
 
     mt = vds.variant_data
+    #mt = vds.variant_data._filter_partitions([41229])
+
     mt = mt.filter_cols(v4_qc_meta_ht[mt.s].release)
 
     meta_join = meta_ht[mt.s]
@@ -106,7 +108,7 @@ def main(args):
         return -mt.GQ, hl.rand_unif(0, 1, seed=1)
 
     logger.info(
-        f"Taking up to {args.num_samples} samples per site where samples are het, hom_var, or hemi"
+        f"For each site, take up to {args.num_samples} samples from each genotype category: het, hom_var, or hemi"
     )
     mt = mt.annotate_rows(
         samples_w_het_var=hl.agg.filter(
