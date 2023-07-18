@@ -1,141 +1,103 @@
+import hail as hl
 import logging
+import os
+import pandas as pd
+import re
 from tqdm import tqdm
 
-import hail as hl
-
-from gnomad.resources.resource_utils import DataException
-from gnomad.utils.file_utils import parallel_file_exists
-
-from tgg.batch.batch_utils import (
-    check_storage_bucket_region,
-    HG38_REF_PATHS,
-    localize_file,
-    init_arg_parser,
-    init_job,
-    run_batch,
-    set_gcloud_project,
-)
-
+from step_pipeline import pipeline, Backend, Localize, Delocalize
 
 logging.basicConfig(
     format="%(asctime)s (%(name)s %(lineno)s): %(message)s",
     datefmt="%m/%d/%Y %I:%M:%S %p",
 )
-logger = logging.getLogger("run_haplotypecaller")
+logger = logging.getLogger("run HaplotypeCaller")
 logger.setLevel(logging.INFO)
 
+hl.init(log="/dev/null", idempotent=True)
 
-EXCLUDE_INTERVALS = (
-    "gs://gnomad-bw2/exclude_intervals_with_non_ACGT_bases_in_GRCh38__150bp_window.bed"
-)
-"""
-Variants to exclude when running HaplotypeCaller.
-"""
 
+# Exclude variants in these regions when running HaplotypeCaller.
+EXCLUDE_INTERVALS = "gs://gnomad-readviz/v4.0/exclude_intervals_with_non_ACGT_bases_in_GRCh38__150bp_window.bed"
+
+# Amount of padding to add around each variant when running HaplotypeCaller.
 PADDING_AROUND_VARIANT = 200
-"""
-Amount of padding to add around each variant when running HaplotypeCaller.
-"""
+
+DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:2438d8c97e7a37306f42e5549da40e1e804d52629d142d6467d84eb6fcd5ecef"
+
+HG38_FASTA_PATH = "gs://gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta"
+HG38_FASTA_INDEX_PATH = "gs://gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta.fai"
+HG38_FASTA_DICT_PATH = "gs://gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.dict"
 
 
-def parse_args():
+def parse_args(batch_pipeline):
     """Parse command line args."""
 
-    p = init_arg_parser(default_cpu=1, default_billing_project="gnomad-production")
+    p = batch_pipeline.get_config_arg_parser()
     p.add_argument(
-        "--gcloud-project",
-        help="Google cloud project. Default is 'broad-mpg-gnomad'.",
-        default="broad-mpg-gnomad",
-    )
-    p.add_argument(
-        "-p",
         "--output-dir",
-        help="Where to write haplotype caller output.",
+        help="Where to write HaplotypeCaller output bams.",
         default="gs://gnomad-readviz/v4.0/bamout",
     )
     p.add_argument(
-        "--docker-image",
-        help="Docker image to use.",
-        default="weisburd/gnomad-readviz@sha256:2438d8c97e7a37306f42e5549da40e1e804d52629d142d6467d84eb6fcd5ecef",
-    )
-    p.add_argument(
-        "--cram-and-tsv_paths-table",
+        "--cram-and-tsv-table-path",
         help="A text file containing at least these columns: sample_id, cram_path",
         default=f"gs://gnomad-readviz/v4.0/step4_output_cram_and_tsv_paths.tsv.gz",
     )
+    p.add_argument(
+        "-n",
+        help="For testing, process only the first N samples",
+        type=int)
+
     args = p.parse_args()
 
     return p, args
 
 
 def main():
-    """
-    Run HaplotypeCaller to generate bamouts.
+    bp = pipeline("step5: run HaplotypeCaller", backend=Backend.HAIL_BATCH_SERVICE, config_file_path="~/.step_pipeline")
 
-    Step 5 of readviz pipeline.
-    """
-    _, args = parse_args()
-    hl.init(log="/dev/null", quiet=True)
-    project = args.gcloud_project
-    docker_image = args.docker_image
-    set_gcloud_project(project)
+    parser, args = parse_args(bp)
 
-    logger.info("Making sure input cram_and_tsv_paths_table arg is valid...")
-    bams = {}
-    samples = {}
-    with hl.hadoop_open(args.cram_and_tsv_paths_table) as c:
-        # Confirm header has all required columns
-        header = c.readline().strip().split("\t")
-        if {"sample_id", "cram_path", "crai_path", "variants_tsv_bgz"} - set(header):
-            raise DataException(
-                "%s must contain 'sample_id', 'cram_path', 'crai_path', variants_tsv_bgz' columns!"
-            )
+    logger.info(f"Loading metadata table: {args.cram_and_tsv_table_path}")
+    with hl.hadoop_open(args.cram_and_tsv_table_path) as f:
+        df = pd.read_table(f)
 
-        for line in c:
-            sample, cram, crai, variants_tsv_bgz = line.strip().split("\t")
-
-            # Store output BAM path
-            bam = f"{args.output_prefix}/{sample}.bamout.bam"
-            bai = f"{args.output_prefix}/{sample}.bamout.bai"
-            bams[sample] = bam
-
-            # Store sample information
-            samples[sample] = [cram, crai, variants_tsv_bgz, bam, bai]
-
-            logger.info(
-                "Checking that all input crams are 'US-CENTRAL1' or multi-regional buckets..."
-            )
-            # Check that all buckets are in "US-CENTRAL1" or are multi-regional to avoid egress charges to the Batch cluster
-            check_storage_bucket_region(cram)
-
-    logger.info("Checking if any output bams already exist...")
-    bam_files_exist = parallel_file_exists(list(bams.values()))
-
-    samples_without_bams = []
-    for sample in bams:
-        if not bam_files_exist[bams[sample]]:
-            samples_without_bams.append(sample)
+    missing_columns = {"sample_id", "cram", "crai", "variants_tsv_bgz", "gatk_version"} - set(df.columns)
+    if missing_columns:
+        parser.error(f"{args.cram_and_tsv_table_path} is missing these columns: {missing_columns}")
 
     # Process samples
-    with run_batch(args, batch_name=f"HaplotypeCaller -bamout") as batch:
-        for sample in tqdm(samples_without_bams, unit="samples"):
-            cram, crai, variants_tsv_bgz, bam, bai = samples[sample]
+    for i, (_, row) in tqdm(enumerate(df.iterrows()), unit=" samples"):
+        if args.n and i >= args.n:
+            break
 
-            j = init_job(
-                batch, f"readviz: {sample}", docker_image, args.cpu, args.memory,
-            )
-            j.command(
-                f"""gcloud -q auth activate-service-account --key-file=/gsa-key/key.json"""
-            )
-            local_exclude_intervals = localize_file(j, EXCLUDE_INTERVALS)
-            local_fasta = localize_file(j, HG38_REF_PATHS.fasta, use_gcsfuse=True)
-            local_fasta_fai = localize_file(j, HG38_REF_PATHS.fai, use_gcsfuse=True)
-            localize_file(j, HG38_REF_PATHS.dict, use_gcsfuse=True)
-            local_tsv_bgz = localize_file(j, variants_tsv_bgz)
-            local_cram_path = localize_file(j, cram)
+        gatk_version = row["gatk_version"]  # example: "4.0.10.1"
 
-            j.command(
-                f"""echo --------------
+        output_filename_prefix = re.sub(".tsv.bgz$", "", os.path.basename(row["variants_tsv_bgz"]))
+
+        s1 = bp.new_step(
+            f"run HaplotypeCaller: {output_filename_prefix}",
+            arg_suffix=f"step1",
+            image=DOCKER_IMAGE,
+            step_number=1,
+            cpu=1,
+            #storage="100Gi",
+            localize_by=Localize.HAIL_BATCH_CLOUDFUSE,
+            delocalize_by=Delocalize.COPY,
+            output_dir=args.output_dir)
+
+        #s1.command("gcloud -q auth activate-service-account --key-file=/gsa-key/key.json")
+        s1.switch_gcloud_auth_to_user_account()
+        local_exclude_intervals = s1.input(EXCLUDE_INTERVALS, localize_by=Localize.COPY)
+        local_fasta = s1.input(HG38_FASTA_PATH)
+        local_fasta_fai = s1.input(HG38_FASTA_INDEX_PATH)
+        local_fasta_dict = s1.input(HG38_FASTA_DICT_PATH)
+        local_tsv_bgz = s1.input(row["variants_tsv_bgz"], localize_by=Localize.COPY)
+        #local_cram_path = s1.input(row["cram"]) # instead use GATK NIO to localize the file
+
+        s1.command(
+            f"""echo --------------
 
 echo "Start - time: $(date)"
 df -kh
@@ -151,9 +113,9 @@ gunzip -c "{local_tsv_bgz}" | awk '{{ OFS="\t" }} {{ print( "chr"$1, $2, $2 ) }}
 # The sort is done by first retrieving the input_cram header and passing it to GATK BedToIntervalList.
 
 java -Xms2g -jar /gatk/gatk.jar PrintReadsHeader \
-    --gcs-project-for-requester-pays {project} \
+    --gcs-project-for-requester-pays {args.gcloud_project} \
     -R {local_fasta} \
-    -I "{local_cram_path}" \
+    -I "{row["cram"]}" \
     -O header.bam
 
 java -Xms2g -jar /gatk/gatk.jar BedToIntervalList \
@@ -165,10 +127,10 @@ java -Xms2g -jar /gatk/gatk.jar BedToIntervalList \
 # 2) Get reads from the input_cram for the intervals in variant_windows.interval_list
 
 time java -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10 -XX:+DisableAttachMechanism -XX:MaxHeapSize=2000m -Xmx30000m \
-    -jar /gatk/GATK35.jar \
+    -jar /gatk/gatk-v{gatk_version}.jar \
     -T HaplotypeCaller \
     -R {local_fasta} \
-    -I "{local_cram_path}" \
+    -I "{row["cram"]}" \
     -L variant_windows.interval_list \
     -XL {local_exclude_intervals} \
     --disable_auto_index_creation_and_locking_when_reading_rods \
@@ -177,22 +139,22 @@ time java -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10 -XX:+DisableAttachMechanism 
     -variant_index_parameter 128000 \
     -variant_index_type LINEAR \
     --read_filter OverclippedRead \
-    -bamout "{sample}.bamout.bam" \
-    -o "{sample}.gvcf"  |& grep -v "^DEBUG"
+    -bamout "{output_filename_prefix}.bamout.bam" \
+    -o "{output_filename_prefix}.gvcf"  |& grep -v "^DEBUG"
 
-bgzip "{sample}.gvcf"
-tabix "{sample}.gvcf.gz"
-
-gsutil -m cp "{sample}.bamout.bam" {args.output_dir}
-gsutil -m cp "{sample}.bamout.bai" {args.output_dir}
-gsutil -m cp "{sample}.gvcf.gz" {args.output_dir}
-gsutil -m cp "{sample}.gvcf.gz.tbi" {args.output_dir}
+bgzip "{output_filename_prefix}.gvcf"
+tabix "{output_filename_prefix}.gvcf.gz"
 
 ls -lh
 echo --------------; free -h; df -kh; uptime; set +xe; echo "Done - time: $(date)"; echo --------------
+""")
 
-"""
-            )
+        s1.output(f"{output_filename_prefix}.bamout.bam")
+        s1.output(f"{output_filename_prefix}.bamout.bai")
+        s1.output(f"{output_filename_prefix}.gvcf.gz")
+        s1.output(f"{output_filename_prefix}.gvcf.gz.tbi")
+
+    bp.run()
 
 
 if __name__ == "__main__":

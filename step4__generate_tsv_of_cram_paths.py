@@ -60,7 +60,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--gnomad-readviz-tsvs-directory",
         help="Cloud storage directory where step3 wrote all per-sample TSVs",
-        default="gs://gnomad-readviz/v4.0/eadviz_tsvs",
+        default="gs://gnomad-readviz/v4.0/readviz_tsvs",
     )
     parser.add_argument(
         "--gnomad-metadata-tsv",
