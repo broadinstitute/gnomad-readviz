@@ -55,7 +55,8 @@ def parse_args(batch_pipeline):
 
 
 def main():
-    bp = pipeline("step5: run HaplotypeCaller", backend=Backend.HAIL_BATCH_SERVICE, config_file_path="~/.step_pipeline")
+    bp = pipeline(backend=Backend.HAIL_BATCH_SERVICE,
+                  config_file_path="~/.step_pipeline_gnomad")
 
     parser, args = parse_args(bp)
 
@@ -67,6 +68,11 @@ def main():
     if missing_columns:
         parser.error(f"{args.cram_and_tsv_table_path} is missing these columns: {missing_columns}")
 
+    if not args.force:
+        paths = bp.precache_file_paths(os.path.join(args.output_dir, f"*.*"))
+        logger.info(f"Found {len(paths)} exising .bam and .g.vcf.gz files")
+
+    bp.name = f"step5: run HaplotypeCaller ({args.n or len(df)} samples)"
     # Process samples
     for i, (_, row) in tqdm(enumerate(df.iterrows()), unit=" samples"):
         if args.n and i >= args.n:
@@ -81,7 +87,7 @@ def main():
             arg_suffix=f"step1",
             image=DOCKER_IMAGE,
             step_number=1,
-            cpu=1,
+            cpu=0.5,
             #storage="100Gi",
             localize_by=Localize.HAIL_BATCH_CLOUDFUSE,
             delocalize_by=Delocalize.COPY,
@@ -97,9 +103,13 @@ def main():
         #local_cram_path = s1.input(row["cram"]) # instead use GATK NIO to localize the file
 
         s1.command(
-            f"""echo --------------
-
+            f"""unset GOOGLE_APPLICATION_CREDENTIALS
+env
+echo --------------
 echo "Start - time: $(date)"
+set -ex
+
+
 df -kh
 
 
@@ -112,13 +122,13 @@ gunzip -c "{local_tsv_bgz}" | awk '{{ OFS="\t" }} {{ print( "chr"$1, $2, $2 ) }}
 # than the interval list passed to GATK tools' -L arg, then GATK may silently skip some of regions in the -L intervals.
 # The sort is done by first retrieving the input_cram header and passing it to GATK BedToIntervalList.
 
-java -Xms2g -jar /gatk/gatk.jar PrintReadsHeader \
+java -Xms2g -jar /gatk/gatk-v4.1.8.0.jar PrintReadsHeader \
     --gcs-project-for-requester-pays {args.gcloud_project} \
     -R {local_fasta} \
     -I "{row["cram"]}" \
     -O header.bam
 
-java -Xms2g -jar /gatk/gatk.jar BedToIntervalList \
+java -Xms2g -jar /gatk/gatk-v4.1.8.0.jar BedToIntervalList \
     --SORT true \
     --SEQUENCE_DICTIONARY header.bam \
     --INPUT variant_windows.bed \
@@ -127,23 +137,14 @@ java -Xms2g -jar /gatk/gatk.jar BedToIntervalList \
 # 2) Get reads from the input_cram for the intervals in variant_windows.interval_list
 
 time java -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10 -XX:+DisableAttachMechanism -XX:MaxHeapSize=2000m -Xmx30000m \
-    -jar /gatk/gatk-v{gatk_version}.jar \
-    -T HaplotypeCaller \
+    -jar /gatk/gatk-v{gatk_version}.jar HaplotypeCaller \
     -R {local_fasta} \
     -I "{row["cram"]}" \
     -L variant_windows.interval_list \
     -XL {local_exclude_intervals} \
-    --disable_auto_index_creation_and_locking_when_reading_rods \
     -ERC GVCF \
-    --max_alternate_alleles 3 \
-    -variant_index_parameter 128000 \
-    -variant_index_type LINEAR \
-    --read_filter OverclippedRead \
     -bamout "{output_filename_prefix}.bamout.bam" \
-    -o "{output_filename_prefix}.gvcf"  |& grep -v "^DEBUG"
-
-bgzip "{output_filename_prefix}.gvcf"
-tabix "{output_filename_prefix}.gvcf.gz"
+    -O "{output_filename_prefix}.g.vcf.gz"  |& grep -v "^DEBUG"
 
 ls -lh
 echo --------------; free -h; df -kh; uptime; set +xe; echo "Done - time: $(date)"; echo --------------
@@ -151,8 +152,8 @@ echo --------------; free -h; df -kh; uptime; set +xe; echo "Done - time: $(date
 
         s1.output(f"{output_filename_prefix}.bamout.bam")
         s1.output(f"{output_filename_prefix}.bamout.bai")
-        s1.output(f"{output_filename_prefix}.gvcf.gz")
-        s1.output(f"{output_filename_prefix}.gvcf.gz.tbi")
+        s1.output(f"{output_filename_prefix}.g.vcf.gz")
+        s1.output(f"{output_filename_prefix}.g.vcf.gz.tbi")
 
     bp.run()
 
