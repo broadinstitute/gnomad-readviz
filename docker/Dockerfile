@@ -67,7 +67,6 @@ RUN wget https://github.com/samtools/samtools/releases/download/${SAMTOOLS_VERSI
 
 RUN samtools --version
 
-
 # python3 packages
 RUN python3 -m pip install --upgrade pip \
 	&& python3 -m pip install --upgrade tqdm pyfaidx pybedtools cyvcf2 peewee scipy numpy pandas matplotlib seaborn ipython
