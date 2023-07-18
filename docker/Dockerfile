@@ -1,18 +1,20 @@
-FROM bitnami/minideb:stretch
+FROM python:3.9.17-slim-bookworm
 
 MAINTAINER Ben Weisburd
 
-# install basic linux utils like 'uptime' and 'free'
-RUN install_packages procps
-
 # install java-8    (adds ~350Mb)
-RUN install_packages default-jdk
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    apt-transport-https \
+    ca-certificates \
+    wget
+RUN mkdir -p /etc/apt/keyrings \
+    && wget -O - https://packages.adoptium.net/artifactory/api/gpg/key/public | tee /etc/apt/keyrings/adoptium.asc \
+    && echo "deb [signed-by=/etc/apt/keyrings/adoptium.asc] https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print$2}' /etc/os-release) main" | tee /etc/apt/sources.list.d/adoptium.list;
 
 RUN apt-get update \
-	&& apt-get dist-upgrade -y \
-	&& apt-get install -y python-smbus libncursesw5-dev libgdbm-dev libc6-dev zlib1g-dev libsqlite3-dev libssl-dev openssl libffi-dev
+    && apt-get install -y --no-install-recommends temurin-8-jdk
 
-RUN install_packages \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     wget \
     curl \
@@ -27,22 +29,23 @@ RUN install_packages \
     zlib1g-dev \
     dpkg-dev \
     build-essential \
+    libncursesw5-dev \
+    libgdbm-dev \
+    libc6-dev \
+    zlib1g-dev \
+    libsqlite3-dev \
+    libssl-dev \
+    openssl \
+    libffi-dev \
     libcurl4-openssl-dev \
     libbz2-dev \
-    liblzma-dev
-
-ENV PYTHON_VERSION="3.7.1"
-RUN wget https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tar.xz \
-	&& tar xvf Python-${PYTHON_VERSION}.tar.xz \
-	&& rm Python-${PYTHON_VERSION}.tar.xz \
-	&& cd Python-${PYTHON_VERSION} \
-	&& ./configure --enable-optimizations \
-	&& make install \
-	&& make clean
+    liblzma-dev \
+    procps \
+    less \
+    htop \
+    vim
 
 ENV SAMTOOLS_VERSION="1.9"
-
-RUN install_packages wget libbz2-dev zlib1g-dev liblzma-dev libcurl4-openssl-dev build-essential
 RUN wget https://github.com/samtools/htslib/releases/download/${SAMTOOLS_VERSION}/htslib-${SAMTOOLS_VERSION}.tar.bz2 \
 	&& tar xjf htslib-${SAMTOOLS_VERSION}.tar.bz2 \
 	&& rm htslib-${SAMTOOLS_VERSION}.tar.bz2 \
@@ -52,7 +55,7 @@ RUN wget https://github.com/samtools/htslib/releases/download/${SAMTOOLS_VERSION
 	&& make install \
 	&& make clean
 
-RUN install_packages libncursesw5-dev
+RUN apt-get install -y --no-install-recommends libncursesw5-dev
 RUN wget https://github.com/samtools/samtools/releases/download/${SAMTOOLS_VERSION}/samtools-${SAMTOOLS_VERSION}.tar.bz2 \
 	&& tar xjf samtools-${SAMTOOLS_VERSION}.tar.bz2 \
 	&& rm samtools-${SAMTOOLS_VERSION}.tar.bz2 \
@@ -64,21 +67,22 @@ RUN wget https://github.com/samtools/samtools/releases/download/${SAMTOOLS_VERSI
 
 RUN samtools --version
 
-COPY --from=broadinstitute/gatk:4.1.4.1 /gatk/gatk-package-4.1.4.1-local.jar /gatk/gatk.jar
-RUN java -jar /gatk/gatk.jar --version
+COPY --from=broadinstitute/gatk:4.0.10.1 /gatk/gatk-package-4.0.10.1-local.jar /gatk/gatk.jar
+COPY --from=broadinstitute/gatk:4.0.10.1 /gatk/gatk-package-4.0.10.1-local.jar /gatk/gatk-v4.0.10.1.jar
+COPY --from=broadinstitute/gatk:4.1.0.0 /gatk/gatk-package-4.1.0.0-local.jar /gatk/gatk-v4.1.0.0.jar
+COPY --from=broadinstitute/gatk:4.1.4.1 /gatk/gatk-package-4.1.4.1-local.jar /gatk/gatk-v4.1.4.1.jar
+COPY --from=broadinstitute/gatk:4.1.8.0 /gatk/gatk-package-4.1.8.0-local.jar /gatk/gatk-v4.1.8.0.jar
 
-COPY --from=us.gcr.io/broad-gotc-prod/genomes-in-the-cloud:2.3.2-1510681135 /usr/gitc/GATK35.jar /gatk/GATK35.jar
-RUN java -jar /gatk/GATK35.jar --version
 
 COPY --from=weisburd/base-other-tools:latest /usr/local/bin/bedtools /usr/local/bin/bedtools
 RUN bedtools --version
 
 # python3 packages
 RUN python3 -m pip install --upgrade pip \
-	&& python3 -m pip install --upgrade tqdm pyvcf pyfaidx pybedtools cyvcf2 peewee scipy numpy pandas matplotlib seaborn ipython
+	&& python3 -m pip install --upgrade tqdm pyfaidx pybedtools cyvcf2 peewee scipy numpy pandas matplotlib seaborn ipython
 
 # install gcloud
-ENV GCLOUD_SDK_VERISON="297.0.1"
+ENV GCLOUD_SDK_VERISON="438.0.0"
 RUN wget https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-${GCLOUD_SDK_VERISON}-linux-x86_64.tar.gz \
     && tar xzf google-cloud-sdk-${GCLOUD_SDK_VERISON}-linux-x86_64.tar.gz \
     && /google-cloud-sdk/install.sh -q \
@@ -86,10 +90,7 @@ RUN wget https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud
 
 ENV PATH=/google-cloud-sdk/bin:$PATH
 
-
-# nice-to-have linux utils
-RUN install_packages less htop vim emacs
-
+# install sqlite3
 RUN wget https://www.sqlite.org/2020/sqlite-autoconf-3330000.tar.gz \
     && tar xzf sqlite-autoconf-3330000.tar.gz \
     && cd sqlite-autoconf-3330000 \

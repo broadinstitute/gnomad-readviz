@@ -51,17 +51,17 @@ def parse_args():
         "-p",
         "--output-dir",
         help="Where to write haplotype caller output.",
-        default="gs://gnomad-bw2/gnomad_v3_1_readviz_bamout",
+        default="gs://gnomad-readviz/v4.0/bamout",
     )
     p.add_argument(
         "--docker-image",
         help="Docker image to use.",
-        default="gcr.io/broad-mpg-gnomad/gnomad-readviz@sha256:7013fc57e3471617a314b08e2bcefe4711d401f83500c5c57e9a3e79ee8efebd",
+        default="weisburd/gnomad-readviz@sha256:2438d8c97e7a37306f42e5549da40e1e804d52629d142d6467d84eb6fcd5ecef",
     )
     p.add_argument(
         "--cram-and-tsv_paths-table",
         help="A text file containing at least these columns: sample_id, cram_path",
-        default=f"step4_output_cram_and_tsv_paths_table.tsv",
+        default=f"gs://gnomad-readviz/v4.0/step4_output_cram_and_tsv_paths.tsv.gz",
     )
     args = p.parse_args()
 

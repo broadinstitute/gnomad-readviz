@@ -1,9 +1,12 @@
 import argparse
 import logging
 import hail as hl
-from gnomad.resources import MatrixTableResource
+import re
 from gnomad.sample_qc.sex import adjusted_sex_ploidy_expr
 from gnomad.utils.filtering import filter_to_adj
+from gnomad.utils.annotations import get_adj_expr
+from gnomad_qc.v4.resources.basics import gnomad_v4_genotypes
+from gnomad_qc.v4.resources.meta import meta
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,71 +32,84 @@ def hom_expr(mt):
 def hemi_expr(mt):
     return hl.or_missing(
         mt.locus.in_x_nonpar() | mt.locus.in_y_nonpar(),
-        mt.GT.is_haploid() & (mt.meta.sex == "male") & (mt.GT[0] == 1),
+        mt.GT.is_haploid() & (mt.meta.sex_karyotype == "XY") & (mt.GT[0] == 1),
     )
 
 
 def main(args):
 
-    hl.init(log="/select_samples", default_reference="GRCh38")
-    meta_ht = hl.read_table(args.sample_metadata_ht)
-    meta_ht = meta_ht.filter(meta_ht.release & hl.is_defined(meta_ht.project_meta.cram_path))
-    meta_ht = meta_ht.select(
-        cram_path=meta_ht.project_meta.cram_path,
-        crai_path=meta_ht.project_meta.cram_path.replace(".cram", ".cram.crai"),
-        sex=meta_ht.project_meta.sex,
-    )
+    hl.init(log="/select_samples", default_reference="GRCh38", idempotent=True, tmp_dir=args.temp_bucket)
+    meta_ht = hl.import_table(args.sample_metadata_tsv, force_bgz=True)
+    meta_ht = meta_ht.key_by("s")
+    meta_ht = meta_ht.filter(hl.is_defined(meta_ht.cram_path) & hl.is_defined(meta_ht.crai_path), keep=True)
+    meta_ht = meta_ht.repartition(1000)
+    meta_ht = meta_ht.checkpoint(
+        re.sub(".tsv(.b?gz)?", "", args.sample_metadata_tsv) + ".ht", overwrite=True, _read_if_exists=True)
 
-    mt = MatrixTableResource(args.gnomad_mt).mt()
-    mt = hl.MatrixTable(hl.ir.MatrixKeyRowsBy(mt._mir, ['locus', 'alleles'], is_sorted=True))
+    vds = gnomad_v4_genotypes.vds()
 
+    # see https://github.com/broadinstitute/ukbb_qc/pull/227/files
     if args.test:
         logger.info("Filtering to chrX PAR1 boundary: chrX:2781477-2781900")
-        mt = hl.filter_intervals(mt, [hl.parse_locus_interval("chrX:2781477-2781900")])
+        vds = hl.vds.filter_intervals(vds, [hl.parse_locus_interval("chrX:2781477-2781900")])
+
+    v4_qc_meta_ht = meta.ht()
+
+    mt = vds.variant_data
+    #mt = vds.variant_data._filter_partitions([41229])
+
+    mt = mt.filter_cols(v4_qc_meta_ht[mt.s].release)
 
     meta_join = meta_ht[mt.s]
     mt = mt.annotate_cols(
         meta=hl.struct(
-            sex=meta_join.sex,
+            sex_karyotype=meta_join.sex_karyotype,
             cram=meta_join.cram_path,
             crai=meta_join.crai_path,
         )
     )
-    logger.info("Filtering to releasable samples with a defined cram path")
-    mt = mt.filter_cols(mt.meta.release & hl.is_defined(mt.meta.cram))
-    mt = hl.experimental.sparse_split_multi(mt, filter_changed_loci=True)
 
     logger.info("Adjusting samples' sex ploidy")
-    mt = mt.annotate_entries(
-        GT=adjusted_sex_ploidy_expr(
-            mt.locus,
-            mt.GT,
-            mt.meta.sex,
-            xy_karyotype_str="male",
-            xx_karyotype_str="female",
-        )
+    lgt_expr = hl.if_else(
+        mt.locus.in_autosome(),
+        mt.LGT,
+        adjusted_sex_ploidy_expr(mt.locus, mt.LGT, mt.meta.sex_karyotype)
     )
-    mt = mt.select_entries("GT", "GQ", "DP", "AD")
+    mt = mt.select_entries(
+        "LA", "GQ", LGT=lgt_expr, adj=get_adj_expr(lgt_expr, mt.GQ, mt.DP, mt.LAD)
+    )
 
     logger.info("Filtering to entries meeting GQ, DP and other 'adj' thresholds")
     mt = filter_to_adj(mt)
-    mt = mt.filter_rows(hl.agg.any(mt.GT.is_non_ref()))
-    mt = mt.filter_rows(hl.len(mt.alleles) > 1)
 
-    logger.info(
-        f"Taking up to {args.num_samples} samples per site where samples are het, hom_var, or hemi"
-    )
+    logger.info("Performing sparse split multi")
+    mt = hl.experimental.sparse_split_multi(mt, filter_changed_loci=True)
+
+    logger.info("Filter variants with at least one non-ref GT")
+    mt = mt.filter_rows(hl.agg.any(mt.GT.is_non_ref()))
+
+    #logger.info(f"Saving checkpoint")
+    #mt = mt.checkpoint(os.path.join(args.temp_bucket, "readviz_select_samples_checkpoint1.vds"),
+    #                   overwrite=True, _read_if_exists=True)
 
     def sample_ordering_expr(mt):
-        """It can be problematic for downstream steps when several samples have many times more variants selected
-        than in other samples. To avoid this, and distribute variants more evenly across samples,
-        add a random number as the secondary sort order. This way, when many samples have an identically high GQ
-        (as often happens for common variants), the same few samples don't get selected repeatedly for all common
-        variants.
+        """For variants that are present in more than 10 samples (or whatever number args.num_samples is set to),
+        this sample ordering determines which samples will be used for readviz. Sorting first by GQ ensures that
+        samples with the highest genotype quality are shown. For common variants, many samples may have maximum GQ,
+        so if we only sort by GQ, the samples for these variants will, in practice, be chosen based on the
+        alphabetical order of their sample ids. This can be problematic because the same few samples would end up being
+        selected for most common variants, and so a disproportionate number of common variants would need read data from
+        these samples. One problem with would be an imbalance in computational load across samples during downstream
+        steps of the readviz pipeline - which would cause some shards to take much longer than others.
+        To avoid this, and distribute variants more evenly across samples, we add a random number as the second sort key
+        so that the choice of samples will be randomized for each common variant.
         """
 
         return -mt.GQ, hl.rand_unif(0, 1, seed=1)
 
+    logger.info(
+        f"For each site, take up to {args.num_samples} samples from each genotype category: het, hom_var, or hemi"
+    )
     mt = mt.annotate_rows(
         samples_w_het_var=hl.agg.filter(
             het_expr(mt),
@@ -122,7 +138,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--overwrite",
-        help="Overwrite if object already exists", action="store_true",
+        help="Overwrite if output file already exists", action="store_true",
     )
     parser.add_argument(
         "--num-samples",
@@ -131,19 +147,19 @@ if __name__ == "__main__":
         default=10,
     )
     parser.add_argument(
-        "--gnomad-mt",
-        help="Path of the full gnomAD matrix table with genotypes",
-        default="gs://gnomad/raw/genomes/3.1/gnomad_v3.1_sparse_unsplit.repartitioned.mt",
+        "--temp-bucket",
+        help="Bucket for intermediate files",
+        default="gs://bw2-delete-after-15-days",
     )
     parser.add_argument(
-        "--sample-metadata-ht",
-        help="Path of the gnomAD sample metadata ht",
-        default="gs://gnomad/metadata/genomes_v3.1/gnomad_v3.1_sample_qc_metadata.ht",
+        "--sample-metadata-tsv",
+        help="Path of the gnomAD sample metadata TSV with columns: s, cram_path, crai_path, sex_karyotype",
+        default="gs://gnomad-readviz/v4.0/gnomad.exomes.v4.0.metadata.tsv.gz",
     )
     parser.add_argument(
         "--output-ht-path",
         help="Path for output hail table",
-        default="gs://gnomad-readviz/v3_and_v3.1/gnomad_v3_1_readviz_crams.ht",
+        default="gs://gnomad-readviz/v4.0/gnomad.exomes.v4.0.readviz_crams.ht",
         #default="gs://gnomad/readviz/genomes_v3/gnomad_v3_readviz_crams.ht",
     )
     args = parser.parse_args()
