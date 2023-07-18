@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument(
         "-o", "--output-bucket-path",
         help="Path where the .tsvs for each sample will be written",
-        default="gs://gnomad-readviz/v4.0/gnomad.exomes.v4.0.readviz_tsvs",
+        default="gs://gnomad-readviz/v4.0/readviz_tsvs",
     )
     parser.add_argument(
         "-f", "--overwrite-existing-tsvs",
@@ -114,6 +114,7 @@ def main():
     backend = hb.ServiceBackend(billing_project=args.billing_project, remote_tmpdir=args.tmp_bucket)
     b = hb.Batch("gnomad-readviz step3: export per-sample TSVs", backend=backend)
     for i, sample_id in enumerate(sample_ids):
+        sample_id = sample_id.replace("/", "_")
         tsv_output_path = os.path.join(args.output_bucket_path, f"{sample_id}.tsv.bgz")
         j = b.new_python_job(sample_id)
         j.image(DOCKER_IMAGE)

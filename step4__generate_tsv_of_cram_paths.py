@@ -1,75 +1,76 @@
 import argparse
 import logging
-
 import hail as hl
-
-from gnomad.resources.resource_utils import DataException
-from gnomad.utils.file_utils import parallel_file_exists
-
-from utils import get_sample_ids
+import os
+import pandas as pd
+import re
 
 logging.basicConfig(format="%(levelname)s (%(name)s %(lineno)s): %(message)s")
 logger = logging.getLogger("get_tsv_for_haplotype_caller")
 logger.setLevel(logging.INFO)
 
+hl.init(log="/dev/null", idempotent=True)
 
+#args = argparse.Namespace()
+#args.gnomad_metadata_tsv = "gnomad.exomes.v4.0.metadata.tsv.gz"
+#args.gnomad_readviz_tsvs_directory = "gs://gnomad-readviz/v4.0/readviz_tsvs"
+#args.output_bucket = "gs://gnomad-readviz/v4.0/readviz_tsvs"
+
+#%%
 def main(args):
-    """
-    Generate single TSV with sample IDs, cram paths, and variant TSV file paths.
+    logger.info(f"Listing {args.gnomad_readviz_tsvs_directory}")
 
-    NOTE: Run locally (`parallel_file_exists` only works locally).
-    """
-    output_bucket = args.output_bucket
+    tsv_paths = [x["path"] for x in hl.hadoop_ls(args.gnomad_readviz_tsvs_directory)]
+    tsv_paths = {re.sub(".tsv.bgz$", "", os.path.basename(path)): path for path in tsv_paths}
 
-    logger.info("Getting sample IDs...")
-    sample_ids = get_sample_ids(args.ids_file)
+    #%%
+    logger.info(f"Found {len(tsv_paths):,d} .tsv.bgz files in {args.gnomad_readviz_tsvs_directory}")
 
-    tsvs = [f"{output_bucket}/{sample}.tsv.bgz" for sample in sample_ids]
-    tsv_files_exist = parallel_file_exists(tsvs)
+    #%%
+    df = pd.read_table(args.gnomad_metadata_tsv)
+    df["s_join"] = df["s"].str.replace("/", "_")
 
-    logger.info("Starting cram existence checks...")
-    cram_map = {}
-    with hl.hadoop_open(args.cram_map) as c:
-        for line in c:
-            sample, cram = line.strip().split("\t")
-            cram_map[sample] = cram
-    cram_files_exist = parallel_file_exists(list(cram_map.values()))
+    mismatched_sample_ids = set(tsv_paths.keys()) - set(df.s_join)
+    if mismatched_sample_ids:
+        raise ValueError(f"Found {len(mismatched_sample_ids)} .tsv.bgz files in {args.gnomad_readviz_tsvs_directory} "
+                         f"with filenames that mismatch the sample ids in the gnomAD metadata from "
+                         f"{args.gnomad_metadata_tsv}: {mismatched_sample_ids}")
 
-    logger.info("Starting to write to output TSV...")
-    with hl.hadoop_open(args.cram_map) as s, hl.hadoop_open(
-        f"{output_bucket}/inputs/step4_output_cram_and_tsv_paths_table.tsv", "w",
-    ) as o:
-        o.write("sample_id\tcram\tcrai\tvariants_tsv_bgz\n")
+    df["variants_tsv_bgz"] = df["s_join"].map(tsv_paths)
+    df = df[~df["variants_tsv_bgz"].isna()]
+    df = df.rename(columns={
+        "s": "sample_id",
+        "cram_path": "cram",
+        "crai_path": "crai",
+    })
 
-        for line in s:
-            sample = line.strip()
-            if sample not in cram_map:
-                raise DataException(
-                    f"{sample} is missing a cram path. Please double check and restart!"
-                )
+    df = df[["sample_id", "cram", "crai", "variants_tsv_bgz", "gatk_version"]]
 
-            cram = cram_map[sample]
-            tsv = f"{output_bucket}/{sample}.tsv.bgz"
-            if not cram_files_exist[cram]:
-                raise DataException(
-                    f"{sample}'s cram does not exist. Please double check and restart!"
-                )
-            if not tsv_files_exist[tsv]:
-                raise DataException(
-                    f"{sample} is missing their variants TSV file. Please double check and restart!"
-                )
-            o.write(f"{sample}\t{cram}\t{cram}.crai\t{tsv}\n")
+    #%%
+
+    logger.info(f"Writing {len(df):,d} rows to {args.output_tsv}")
+    with hl.hadoop_open(args.output_tsv, "w") as f:
+        df.to_csv(f, header=True, sep="\t", index=False)
+
+    logger.info("Done")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ids-file", help="Path to local file with sample IDs.")
     parser.add_argument(
-        "--cram-map",
-        help="Path to file in cloud storage with cram to sample mapping. File should have two columns: sample ID and cram path.",
+        "--gnomad-readviz-tsvs-directory",
+        help="Cloud storage directory where step3 wrote all per-sample TSVs",
+        default="gs://gnomad-readviz/v4.0/eadviz_tsvs",
     )
     parser.add_argument(
-        "--output-bucket", help="Path to output bucket (where to store output TSVs)."
+        "--gnomad-metadata-tsv",
+        help="Path of local gnomAD metadata table with columns: 's', 'cram_path', 'crai_path', and 'gatk version'",
+        default="gnomad.exomes.v4.0.metadata.tsv.gz",
+    )
+    parser.add_argument(
+        "--output-tsv",
+        help="Path where to write the output tsv",
+        default="gs://gnomad-readviz/v4.0/step4_output_cram_and_tsv_paths.tsv.gz",
     )
     args = parser.parse_args()
 
