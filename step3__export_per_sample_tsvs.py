@@ -74,6 +74,9 @@ def export_per_sample_tsv(input_ht_path, sample_id, tsv_output_path):
 
     ht = hl.read_table(input_ht_path)
     per_sample_ht = ht.filter(ht.S == sample_id, keep=True)
+    if per_sample_ht.count() == 0:
+        logging.info(f"Skipping {sample_id} because it has 0 variants")
+        return
     per_sample_ht = per_sample_ht.key_by()
     # re-order columns and drop sample id since it's in the .tsv filename
     per_sample_ht = per_sample_ht.select('chrom', 'pos', 'ref', 'alt', 'het_or_hom_or_hemi', 'GQ')
