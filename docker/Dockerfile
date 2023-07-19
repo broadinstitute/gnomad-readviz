@@ -92,6 +92,14 @@ RUN wget https://www.sqlite.org/2020/sqlite-autoconf-3330000.tar.gz \
 
 RUN python3 -m pip install hail crcmod
 
+# install cloudfuse
+RUN GCSFUSE_REPO=gcsfuse-bullseye \
+	&& echo "deb https://packages.cloud.google.com/apt $GCSFUSE_REPO main" | tee /etc/apt/sources.list.d/gcsfuse.list \
+	&& apt-get install --no-install-recommends --yes gnupg \
+	&& curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add - \
+	&& apt-get update && apt-get install --no-install-recommends --yes fuse gcsfuse
+
+
 # install all the GATK versions used in generating the gnomAD v4 callset
 COPY --from=broadinstitute/gatk:4.0.10.1 /gatk/gatk-package-4.0.10.1-local.jar /gatk/gatk-v4.0.10.1.jar
 COPY --from=broadinstitute/gatk:4.1.0.0 /gatk/gatk-package-4.1.0.0-local.jar /gatk/gatk-v4.1.0.0.jar
