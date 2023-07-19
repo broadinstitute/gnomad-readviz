@@ -99,21 +99,19 @@ def main():
             step_number=1,
             cpu=0.5,
             storage="20Gi",
-            localize_by=Localize.HAIL_BATCH_CLOUDFUSE,
             delocalize_by=Delocalize.COPY,
             output_dir=args.output_dir)
 
-        #s1.command("gcloud -q auth activate-service-account --key-file=/gsa-key/key.json")
         s1.switch_gcloud_auth_to_user_account()
-        local_exclude_intervals = s1.input(EXCLUDE_INTERVALS, localize_by=Localize.COPY)
-        local_fasta = s1.input(HG38_FASTA_PATH)
-        local_fasta_fai = s1.input(HG38_FASTA_INDEX_PATH)
-        local_fasta_dict = s1.input(HG38_FASTA_DICT_PATH)
-        local_tsv_bgz = s1.input(row["variants_tsv_bgz"], localize_by=Localize.COPY)
+        local_fasta = s1.input(HG38_FASTA_PATH, localize_by=Localize.HAIL_BATCH_CLOUDFUSE)
+        local_fasta_fai = s1.input(HG38_FASTA_INDEX_PATH, localize_by=Localize.HAIL_BATCH_CLOUDFUSE)
+        local_fasta_dict = s1.input(HG38_FASTA_DICT_PATH, localize_by=Localize.HAIL_BATCH_CLOUDFUSE)
 
-        local_cram_path = s1.input(row["cram"], localize_by=Localize.GSUTIL_COPY) # instead use GATK NIO to localize the file
-        local_crai_path = s1.input(row["crai"], localize_by=Localize.GSUTIL_COPY) # instead use GATK NIO to localize the file
+        local_tsv_bgz = s1.input(row["variants_tsv_bgz"], localize_by=Localize.GSUTIL_COPY)
+        local_exclude_intervals = s1.input(EXCLUDE_INTERVALS, localize_by=Localize.GSUTIL_COPY)
 
+        local_cram_path = s1.input(row["cram"], localize_by=Localize.GSUTIL_COPY)
+        local_crai_path = s1.input(row["crai"], localize_by=Localize.GSUTIL_COPY)
         s1.command(f"ln -s {local_cram_path} {local_cram_path.filename}")
         s1.command(f"ln -s {local_crai_path} {local_crai_path.filename}")
         local_cram_path = local_cram_path.filename
