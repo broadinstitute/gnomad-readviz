@@ -23,7 +23,7 @@ EXCLUDE_INTERVALS = "gs://gnomad-readviz/v4.0/exclude_intervals_with_non_ACGT_ba
 # Amount of padding to add around each variant when running HaplotypeCaller.
 PADDING_AROUND_VARIANT = 200
 
-DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:c14fe84cb8ca62ee96ec819cac5d74b2770d9a8b018dec76179ee9ea2dd05fb2"
+DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:555a77391da1ce4b7a77615f830e9a566d7c3d018902b5b8af2f50ecf071f1c7"
 
 HG38_FASTA_PATH = "gs://gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta"
 HG38_FASTA_INDEX_PATH = "gs://gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta.fai"
@@ -44,10 +44,17 @@ def parse_args(batch_pipeline):
         help="A text file containing at least these columns: sample_id, cram_path",
         default=f"gs://gnomad-readviz/v4.0/step4_output_cram_and_tsv_paths.tsv.gz",
     )
-    p.add_argument(
+
+    debugging_group = p.add_mutually_exclusive_group()
+    debugging_group.add_argument(
         "-n",
         help="For testing, process only the first N samples",
         type=int)
+    debugging_group.add_argument(
+        "-s", "--sample-id",
+        help="Only process this sample id",
+        action="append",
+    )
 
     args = p.parse_args()
 
@@ -72,6 +79,9 @@ def main():
         paths = bp.precache_file_paths(os.path.join(args.output_dir, f"*.*"))
         logger.info(f"Found {len(paths)} exising .bam and .g.vcf.gz files")
 
+    if args.sample_id:
+        df = df[df["sample_id"].isin(args.sample_id)]
+
     bp.name = f"step5: run HaplotypeCaller ({args.n or len(df)} samples)"
     # Process samples
     for i, (_, row) in tqdm(enumerate(df.iterrows()), unit=" samples"):
@@ -88,7 +98,7 @@ def main():
             image=DOCKER_IMAGE,
             step_number=1,
             cpu=0.5,
-            #storage="100Gi",
+            storage="20Gi",
             localize_by=Localize.HAIL_BATCH_CLOUDFUSE,
             delocalize_by=Delocalize.COPY,
             output_dir=args.output_dir)
@@ -100,14 +110,20 @@ def main():
         local_fasta_fai = s1.input(HG38_FASTA_INDEX_PATH)
         local_fasta_dict = s1.input(HG38_FASTA_DICT_PATH)
         local_tsv_bgz = s1.input(row["variants_tsv_bgz"], localize_by=Localize.COPY)
-        #local_cram_path = s1.input(row["cram"]) # instead use GATK NIO to localize the file
+
+        local_cram_path = s1.input(row["cram"], localize_by=Localize.GSUTIL_COPY) # instead use GATK NIO to localize the file
+        local_crai_path = s1.input(row["crai"], localize_by=Localize.GSUTIL_COPY) # instead use GATK NIO to localize the file
+
+        s1.command(f"ln -s {local_cram_path} {local_cram_path.filename}")
+        s1.command(f"ln -s {local_crai_path} {local_crai_path.filename}")
+        local_cram_path = local_cram_path.filename
 
         s1.command(
             f"""unset GOOGLE_APPLICATION_CREDENTIALS
 env
 echo --------------
 echo "Start - time: $(date)"
-set -ex
+set -exuo pipefail
 
 
 df -kh
@@ -117,6 +133,9 @@ df -kh
 
 gunzip -c "{local_tsv_bgz}" | awk '{{ OFS="\t" }} {{ print( "chr"$1, $2, $2 ) }}' | bedtools slop -b {PADDING_AROUND_VARIANT} -g {local_fasta_fai} > variant_windows.bed
 
+# for debugging
+# cat variant_windows.bed  
+
 # Sort the .bed file so that chromosomes are in the same order as in the input_cram file.
 # Without this, if the input_cram has a different chromosome ordering (eg. chr1, chr10, .. vs. chr1, chr2, ..)
 # than the interval list passed to GATK tools' -L arg, then GATK may silently skip some of regions in the -L intervals.
@@ -125,8 +144,11 @@ gunzip -c "{local_tsv_bgz}" | awk '{{ OFS="\t" }} {{ print( "chr"$1, $2, $2 ) }}
 java -Xms2g -jar /gatk/gatk-v4.1.8.0.jar PrintReadsHeader \
     --gcs-project-for-requester-pays {args.gcloud_project} \
     -R {local_fasta} \
-    -I "{row["cram"]}" \
+    -I "{local_cram_path}" \
     -O header.bam
+
+# for debugging
+# samtools view -H header.bam
 
 java -Xms2g -jar /gatk/gatk-v4.1.8.0.jar BedToIntervalList \
     --SORT true \
@@ -134,12 +156,16 @@ java -Xms2g -jar /gatk/gatk-v4.1.8.0.jar BedToIntervalList \
     --INPUT variant_windows.bed \
     --OUTPUT variant_windows.interval_list
 
+# for debugging
+# cat variant_windows.interval_list  
+
+
 # 2) Get reads from the input_cram for the intervals in variant_windows.interval_list
 
 time java -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10 -XX:+DisableAttachMechanism -XX:MaxHeapSize=2000m -Xmx30000m \
     -jar /gatk/gatk-v{gatk_version}.jar HaplotypeCaller \
     -R {local_fasta} \
-    -I "{row["cram"]}" \
+    -I "{local_cram_path}" \
     -L variant_windows.interval_list \
     -XL {local_exclude_intervals} \
     -ERC GVCF \
