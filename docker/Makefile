@@ -1,6 +1,6 @@
 DOCKER_IMAGE_NAME=gnomad-readviz
-TAG1 = gcr.io/broad-mpg-gnomad/${DOCKER_IMAGE_NAME}:v4
-TAG2 = gcr.io/broad-mpg-gnomad/${DOCKER_IMAGE_NAME}:latest
+TAG1 = weisburd/${DOCKER_IMAGE_NAME}:v4
+TAG2 = weisburd/${DOCKER_IMAGE_NAME}:latest
 
 PWD=`pwd`
 
