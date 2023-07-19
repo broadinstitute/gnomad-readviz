@@ -45,16 +45,23 @@ def parse_args(batch_pipeline):
         default=f"gs://gnomad-readviz/v4.0/step4_output_cram_and_tsv_paths.tsv.gz",
     )
 
+
     debugging_group = p.add_mutually_exclusive_group()
-    debugging_group.add_argument(
-        "-n",
-        help="For testing, process only the first N samples",
-        type=int)
     debugging_group.add_argument(
         "-s", "--sample-id",
         help="Only process this sample id",
         action="append",
     )
+    debugging_group.add_argument(
+        "-n",
+        help="For testing, process only the first N samples",
+        type=int)
+
+    p.add_argument(
+        "--offset",
+        help="Skip the first this many sampmles",
+        default=0,
+        type=int)
 
     args = p.parse_args()
 
@@ -82,10 +89,12 @@ def main():
     if args.sample_id:
         df = df[df["sample_id"].isin(args.sample_id)]
 
-    bp.name = f"step5: run HaplotypeCaller ({args.n or len(df)} samples)"
+    bp.name = f"step5: run HaplotypeCaller ({min(args.n or 10**9, (len(df) - args.offset))} samples)"
     # Process samples
     for i, (_, row) in tqdm(enumerate(df.iterrows()), unit=" samples"):
-        if args.n and i >= args.n:
+        if args.offset and i < args.offset:
+            continue
+        if args.n and i >= args.offset + args.n:
             break
 
         gatk_version = row["gatk_version"]  # example: "4.0.10.1"
