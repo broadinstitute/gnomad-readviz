@@ -14,7 +14,7 @@ logging.basicConfig(
 logger = logging.getLogger("deidentify bamouts")
 logger.setLevel(logging.INFO)
 
-DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:a80f2672ba0c23ad63a8319e33d8e74c332f6d4e0c5f0683e943aac1b6462654"
+DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:555a77391da1ce4b7a77615f830e9a566d7c3d018902b5b8af2f50ecf071f1c7"
 
 OUTPUT_BUCKET = "gs://gnomad-readviz/v4.0/deidentified_bamout"
 
@@ -80,9 +80,8 @@ def main():
 
     bp.name = f"step7: deidentify bamouts ({min(args.n or 10**9, (len(df) - args.offset))} samples)"
 
-    # check that all buckets are in "US-CENTRAL1" or are multi-regional to avoid egress charges to the Batch cluster
-    with open("deidentify_bamout.py", "rt") as f:
-        deidentify_bamouts_script = f.read()
+    #with open("deidentify_bamout.py", "rt") as f:
+    #    deidentify_bamouts_script = f.read()
 
     logging.info(f"Processing {len(df)} samples")
     for i, (_, row) in tqdm(enumerate(df.iterrows()), unit=" samples"):
@@ -106,12 +105,12 @@ def main():
         local_tsv_path = s1.input(row.variants_tsv_bgz)
         local_bamout_path, _ = s1.inputs(row.output_bamout_bam, row.output_bamout_bai)
 
-        s1.command(f"""echo --------------
-cat <<EOF > deidentify_bamout.py
-{deidentify_bamouts_script}
-EOF
+#        s1.command(f"""cat <<EOF > deidentify_bamout.py
+#{deidentify_bamouts_script}
+#EOF""")
 
-time python3 deidentify_bamout.py "{row.sample_id}" "{local_bamout_path}" "{local_tsv_path}"
+        s1.command(f"""echo --------------
+time python3 /deidentify_bamout.py "{row.sample_id}" "{local_bamout_path}" "{local_tsv_path}"
 
 samtools sort -o "{row.sample_id}.deidentified.sorted.bam" "{row.sample_id}.deidentified.bam"
 mv "{row.sample_id}.deidentified.sorted.bam" "{row.sample_id}.deidentified.bam"
