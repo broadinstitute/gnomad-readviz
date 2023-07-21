@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s: %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
 
-SQLITE_BATCH_SIZE = 10000
+SQLITE_BATCH_SIZE = 1000
 FETCH_PADDING_AROUND_VARIANT = 200  # bp
 
 
@@ -120,10 +120,10 @@ def copy_reads_to_bam(obam, ibam, chrom, pos, ref, alt, zygosity, read_group_id)
     artificial_haplotypes_that_dont_overlap_variant = {}  # maps each artificial haplotype id (eg. HC tag value) to the interval spanned by this artificial haplotype: (r.reference_start, r.reference_end)
 
     # iterate over the reads
-    raw_reads = {}  # maps each artificial haplotype id (eg. HC tag value) to the list of reads assigned to this haplotype (eg. that have this id in their HC tag)
+    raw_reads = {}   # maps each artificial haplotype id (eg. HC tag value) to the list of reads assigned to this haplotype (eg. that have this id in their HC tag)
     for r in list(ibam.fetch(f"chr{chrom}", max(1, variant_start - FETCH_PADDING_AROUND_VARIANT), variant_end + FETCH_PADDING_AROUND_VARIANT)):
         tags = dict(r.tags)
-        haplotype_id = tags.get('HC', 'reads-without-HC-tag')  # keep reads that aren't asigned to a haplotype
+        haplotype_id = tags.get('HC', 'reads-without-HC-tag')  # keep reads that aren't assigned to a haplotype
         if tags.get('RG') == "ArtificialHaplotype":
             # handle reads that are actually artificial haplotypes
             artificial_haplotype_counter += 1
@@ -224,7 +224,7 @@ def generate_deidentified_bam(sample_id, input_bam_path, tsv_record_iterator, ts
     }
 
     # open output bam file
-    bam_output_path = f"{sample_id}.deidentify_output.bam"
+    bam_output_path = f"{sample_id}.deidentified.bam"
     with pysam.AlignmentFile(bam_output_path, "wb", header=header) as obam:
 
         counter = 0
@@ -275,7 +275,7 @@ def write_to_database(sample_id, db_record_iterator):
     """
 
     # create sqlite database
-    db_path = f"{sample_id}.deidentify_output.db"
+    db_path = f"{sample_id}.deidentified.db"
     if os.path.isfile(db_path):
         os.remove(db_path)
     sqlite_db = peewee.SqliteDatabase(db_path, autocommit=False)

@@ -23,7 +23,7 @@ EXCLUDE_INTERVALS = "gs://gnomad-readviz/v4.0/exclude_intervals_with_non_ACGT_ba
 # Amount of padding to add around each variant when running HaplotypeCaller.
 PADDING_AROUND_VARIANT = 200
 
-DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:555a77391da1ce4b7a77615f830e9a566d7c3d018902b5b8af2f50ecf071f1c7"
+DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:a80f2672ba0c23ad63a8319e33d8e74c332f6d4e0c5f0683e943aac1b6462654"
 
 HG38_FASTA_PATH = "gs://gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta"
 HG38_FASTA_INDEX_PATH = "gs://gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta.fai"
@@ -44,8 +44,6 @@ def parse_args(batch_pipeline):
         help="A text file containing at least these columns: sample_id, cram_path",
         default=f"gs://gnomad-readviz/v4.0/step4_output_cram_and_tsv_paths.tsv.gz",
     )
-
-
     debugging_group = p.add_mutually_exclusive_group()
     debugging_group.add_argument(
         "-s", "--sample-id",
@@ -56,7 +54,6 @@ def parse_args(batch_pipeline):
         "-n",
         help="For testing, process only the first N samples",
         type=int)
-
     p.add_argument(
         "--offset",
         help="Skip the first this many sampmles",
@@ -82,15 +79,18 @@ def main():
     if missing_columns:
         parser.error(f"{args.cram_and_tsv_table_path} is missing these columns: {missing_columns}")
 
-    if not args.force:
-        paths = bp.precache_file_paths(os.path.join(args.output_dir, f"*.*"))
-        logger.info(f"Found {len(paths)} exising .bam and .g.vcf.gz files")
+    #df = df[~df["cram"].str.contains("gs://timi-cram")]
 
     if args.sample_id:
         df = df[df["sample_id"].isin(args.sample_id)]
 
+    if not args.force:
+        paths = bp.precache_file_paths(os.path.join(args.output_dir, f"*.*"))
+        logger.info(f"Found {len(paths)} exising .bam and .g.vcf.gz files")
+
     bp.name = f"step5: run HaplotypeCaller ({min(args.n or 10**9, (len(df) - args.offset))} samples)"
-    # Process samples
+
+    logging.info(f"Processing {len(df)} samples")
     for i, (_, row) in tqdm(enumerate(df.iterrows()), unit=" samples"):
         if args.offset and i < args.offset:
             continue
@@ -109,7 +109,8 @@ def main():
             cpu=0.5,
             storage="20Gi",
             delocalize_by=Delocalize.COPY,
-            output_dir=args.output_dir)
+            output_dir=args.output_dir,
+            all_outputs_precached=True)
 
         s1.switch_gcloud_auth_to_user_account()
         local_fasta = s1.input(HG38_FASTA_PATH, localize_by=Localize.HAIL_BATCH_CLOUDFUSE)
@@ -124,24 +125,28 @@ def main():
         s1.command(f"ln -s {local_cram_path} {local_cram_path.filename}")
         s1.command(f"ln -s {local_crai_path} {local_crai_path.filename}")
         local_cram_path = local_cram_path.filename
+        local_crai_path = local_crai_path.filename
 
+        s1.command("set +exuo pipefail")
+        s1.command(f"samtools view -b {local_cram_path} > " + local_cram_path.replace(".cram", ".bam"))
+        local_cram_path = local_cram_path.replace(".cram", ".bam")
+        s1.command(f"samtools index {local_cram_path}")
+
+        if "gs://timi-cram" in row["cram"]:
+            s1.regions("us-east1")
+        else:
+            s1.regions("us-central1")
         s1.command(
             f"""unset GOOGLE_APPLICATION_CREDENTIALS
 env
 echo --------------
 echo "Start - time: $(date)"
 set -exuo pipefail
-
-
 df -kh
-
 
 # 1) Convert variants_tsv_bgz to sorted interval list
 
 gunzip -c "{local_tsv_bgz}" | awk '{{ OFS="\t" }} {{ print( "chr"$1, $2, $2 ) }}' | bedtools slop -b {PADDING_AROUND_VARIANT} -g {local_fasta_fai} > variant_windows.bed
-
-# for debugging
-# cat variant_windows.bed  
 
 # Sort the .bed file so that chromosomes are in the same order as in the input_cram file.
 # Without this, if the input_cram has a different chromosome ordering (eg. chr1, chr10, .. vs. chr1, chr2, ..)
@@ -154,18 +159,11 @@ java -Xms2g -jar /gatk/gatk-v4.1.8.0.jar PrintReadsHeader \
     -I "{local_cram_path}" \
     -O header.bam
 
-# for debugging
-# samtools view -H header.bam
-
 java -Xms2g -jar /gatk/gatk-v4.1.8.0.jar BedToIntervalList \
     --SORT true \
     --SEQUENCE_DICTIONARY header.bam \
     --INPUT variant_windows.bed \
     --OUTPUT variant_windows.interval_list
-
-# for debugging
-# cat variant_windows.interval_list  
-
 
 # 2) Get reads from the input_cram for the intervals in variant_windows.interval_list
 

@@ -23,7 +23,7 @@ GCLOUD_PROJECT = "broad-mpg-gnomad"
 GCLOUD_USER_ACCOUNT = "weisburd@broadinstitute.org"
 GCLOUD_CREDENTIALS_LOCATION = "gs://weisburd-misc/creds"
 
-DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:555a77391da1ce4b7a77615f830e9a566d7c3d018902b5b8af2f50ecf071f1c7"
+DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:a80f2672ba0c23ad63a8319e33d8e74c332f6d4e0c5f0683e943aac1b6462654"
 
 #INPUT_BAM_BUCKET = "gs://gnomad-bw2/gnomad_all_readviz_bamout_deidentified"
 INPUT_BAM_BUCKET = "gs://gnomad-bw2/gnomad_all_readviz_bamout_deidentified_v3_and_v31_fixed__20210101"
@@ -120,7 +120,7 @@ def combine_bam_files_in_group(args, batch, combined_bamout_id, group, input_bam
     total_bam_size = 0
     try:
         for _, row in group.iterrows():
-            total_bam_size += input_bam_size_dict[f"{INPUT_BAM_BUCKET}/{row.sample_id}.deidentify_output.sorted.bam"]
+            total_bam_size += input_bam_size_dict[f"{INPUT_BAM_BUCKET}/{row.sample_id}.deidentified.bam"]
 
     except Exception as e:
         logger.error(f"ERROR in group {combined_bamout_id}: {e}. Unable to combine bams for group {combined_bamout_id}. Skipping...")
@@ -143,8 +143,8 @@ def combine_bam_files_in_group(args, batch, combined_bamout_id, group, input_bam
     for_loop_bam_list = ""
     picard_merge_bam_inputs = ""
     for _, row in group.iterrows():
-        local_input_bam_path = batch_utils.localize_file(j, f"{INPUT_BAM_BUCKET}/{row.sample_id}.deidentify_output.sorted.bam", use_gcsfuse=True)
-        #local_input_bai_path = batch_utils.localize_file(j, f"{INPUT_BAM_BUCKET}/{row.sample_id}.deidentify_output.sorted.bam.bai", use_gcsfuse=True)
+        local_input_bam_path = batch_utils.localize_file(j, f"{INPUT_BAM_BUCKET}/{row.sample_id}.deidentified.bam", use_gcsfuse=True)
+        #local_input_bai_path = batch_utils.localize_file(j, f"{INPUT_BAM_BUCKET}/{row.sample_id}.deidentified.bam.bai", use_gcsfuse=True)
         for_loop_bam_list += f" '{local_input_bam_path}'"
         picard_merge_bam_inputs += f" -I '{os.path.basename(local_input_bam_path).replace(' ', '_').replace(':', '_')}' "
 
@@ -185,7 +185,7 @@ def combine_db_files_in_group_for_chrom(
     try:
         chr1_db_size_estimate = 0
         for _, row in group.iterrows():
-            chr1_db_size_estimate += input_db_size_dict[f"{INPUT_BAM_BUCKET}/{row.sample_id}.deidentify_output.db"] * 0.1  # multipy by 0.1 because chr1 is < 10% of the genome
+            chr1_db_size_estimate += input_db_size_dict[f"{INPUT_BAM_BUCKET}/{row.sample_id}.deidentified.db"] * 0.1  # multipy by 0.1 because chr1 is < 10% of the genome
 
     except Exception as e:
         logger.error(f"ERROR in group {combined_bamout_id}: {e}. Unable to combine dbs for group {combined_bamout_id}. Skipping...")
@@ -213,7 +213,7 @@ def combine_db_files_in_group_for_chrom(
 
         local_input_db_paths = []
         for _, row in group.iterrows():
-            local_input_db_path = batch_utils.localize_file(j2, f"{INPUT_BAM_BUCKET}/{row.sample_id}.deidentify_output.db", use_gcsfuse=False)
+            local_input_db_path = batch_utils.localize_file(j2, f"{INPUT_BAM_BUCKET}/{row.sample_id}.deidentified.db", use_gcsfuse=False)
             local_input_db_paths.append(local_input_db_path)
 
         add_command_to_combine_dbs(
@@ -285,11 +285,11 @@ def main():
 
     if not args.skip_step1:
         existing_combined_bamout_bams = batch_utils.generate_path_to_file_size_dict(f"{OUTPUT_BUCKET}/*.bam")
-        input_bam_size_dict = batch_utils.generate_path_to_file_size_dict(f"{INPUT_BAM_BUCKET}/*.deidentify_output.sorted.bam")
+        input_bam_size_dict = batch_utils.generate_path_to_file_size_dict(f"{INPUT_BAM_BUCKET}/*.deidentified.bam")
 
     if not args.skip_step2:
         existing_combined_dbs = batch_utils.generate_path_to_file_size_dict(f"{OUTPUT_BUCKET}/*.chr*.db")
-        input_db_size_dict = batch_utils.generate_path_to_file_size_dict(f"{INPUT_BAM_BUCKET}/*.deidentify_output.db")
+        input_db_size_dict = batch_utils.generate_path_to_file_size_dict(f"{INPUT_BAM_BUCKET}/*.deidentified.db")
 
     # process groups
     with batch_utils.run_batch(args, batch_name=f"combine readviz bams: {len(groups)} group(s) (gs{args.group_size}_gn{num_groups}__s{len(df)})") as batch:

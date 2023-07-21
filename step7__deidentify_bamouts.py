@@ -1,156 +1,128 @@
-from datetime import datetime
 import hail as hl   # used for hadoop file utils
 import logging
-import math
 import os
 import pandas as pd
 import subprocess
-import sys
-import tqdm
+from tqdm import tqdm
 
-# TODO create & keep a mapping of variant to sample ids?
+from step_pipeline import pipeline, Backend, Localize, Delocalize
 
-from batch import batch_utils
+logging.basicConfig(
+    format="%(asctime)s (%(name)s %(lineno)s): %(message)s",
+    datefmt="%m/%d/%Y %I:%M:%S %p",
+)
+logger = logging.getLogger("deidentify bamouts")
+logger.setLevel(logging.INFO)
 
-logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
+DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:a80f2672ba0c23ad63a8319e33d8e74c332f6d4e0c5f0683e943aac1b6462654"
 
-
-GCLOUD_PROJECT = "broad-mpg-gnomad"
-GCLOUD_USER_ACCOUNT = "weisburd@broadinstitute.org"
-GCLOUD_CREDENTIALS_LOCATION = "gs://weisburd-misc/creds"
-
-DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:555a77391da1ce4b7a77615f830e9a566d7c3d018902b5b8af2f50ecf071f1c7"
-
-OUTPUT_BUCKET = "gs://gnomad-bw2/gnomad_all_readviz_bamout_deidentified_v3_and_v31_fixed__20210101"
+OUTPUT_BUCKET = "gs://gnomad-readviz/v4.0/deidentified_bamout"
 
 
-def parse_args():
+def parse_args(batch_pipeline):
     """Parse command line args."""
 
-    p = batch_utils.init_arg_parser(default_cpu=0.25, default_billing_project="gnomAD-readviz", gsa_key_file=os.path.expanduser("~/.config/gcloud/misc-270914-cb9992ec9b25.json"))
-    p.add_argument("-n", "--num-samples-to-process", help="For testing, process only the given sample id(s).", type=int)
-    p.add_argument("--random", action="store_true", help="Select random sample")
-    p.add_argument("-s", "--sample-to-process", help="For testing, process only the given sample id(s).", action="append")
-    p.add_argument("--output-dir", help="Where to write combined bams.", default=OUTPUT_BUCKET)
-    p.add_argument("cram_and_tsv_paths_table", help="A text file containing at least these columns: sample_id, cram_path")
+    p = batch_pipeline.get_config_arg_parser()
+    p.add_argument(
+        "--output-dir",
+        help="Where to write HaplotypeCaller output bams.",
+        default=OUTPUT_BUCKET,
+    )
+    debugging_group = p.add_mutually_exclusive_group()
+    debugging_group.add_argument(
+        "-s", "--sample-id",
+        help="Only process this sample id",
+        action="append",
+    )
+    debugging_group.add_argument(
+        "-n",
+        help="For testing, process only the first N samples",
+        type=int)
+    p.add_argument(
+        "--offset",
+        help="Skip the first this many sampmles",
+        default=0,
+        type=int)
+    p.add_argument(
+        "--random",
+        help="Randomly select -n samples",
+        action="store_true")
+    p.add_argument(
+        "tsv_and_bamout_paths_table",
+        help="A text file containing at least these columns: "
+             "sample_id, output_bamout_bam, output_bamout_bai, variants_tsv_bgz")
     args = p.parse_args()
 
     return p, args
 
 
 def main():
+    bp = pipeline(backend=Backend.HAIL_BATCH_SERVICE,
+                  config_file_path="~/.step_pipeline_gnomad")
 
-    p, args = parse_args()
+    parser, args = parse_args(bp)
 
-    df = pd.read_table(args.cram_and_tsv_paths_table)
-    if {"sample_id", "output_bamout_bam", "output_bamout_bai", "variants_tsv_bgz"} - set(df.columns):
-        p.error(f"{args.tsv_path} must contain 'sample_id', 'output_bamout_bam', 'variants_tsv_bgz' columns")
+    df = pd.read_table(args.tsv_and_bamout_paths_table)
 
-    if args.num_samples_to_process:
-        if args.random:
-            df = df.sample(n=args.num_samples_to_process)
-        else:
-            df = df.iloc[:args.num_samples_to_process]
+    missing_columns = {"sample_id", "output_bamout_bam", "output_bamout_bai", "variants_tsv_bgz"} - set(df.columns)
+    if missing_columns:
+        parser.error(f"{args.tsv_and_bamout_paths_table} is missing these columns: {missing_columns}")
 
-    if args.sample_to_process:
-        df = df[df.sample_id.isin(set(args.sample_to_process))]
+    if args.n and args.random:
+        df = df.sample(n=args.n)
 
-    logging.info(f"Processing {len(df)} samples")
+    if args.sample_id:
+        df = df[df["sample_id"].isin(args.sample_id)]
+
+    if not args.force:
+        paths = bp.precache_file_paths(os.path.join(args.output_dir, f"*.*"))
+        logger.info(f"Found {len(paths)} exising .bam, .bai, .db files")
+
+    bp.name = f"step7: deidentify bamouts ({min(args.n or 10**9, (len(df) - args.offset))} samples)"
 
     # check that all buckets are in "US-CENTRAL1" or are multi-regional to avoid egress charges to the Batch cluster
-    batch_utils.set_gcloud_project(GCLOUD_PROJECT)
     with open("deidentify_bamout.py", "rt") as f:
         deidentify_bamouts_script = f.read()
 
-    # process sample(s)
-    if not args.sample_to_process and not args.num_samples_to_process:
-        # if processing entire table, listing all files up front ends up being faster
-        existing_deidentify_output_bams = subprocess.check_output(f"gsutil -m ls {args.output_dir}/*.deidentify_output.bam", shell=True, encoding="UTF-8").strip().split("\n")
-        existing_deidentify_output_sorted_bams = subprocess.check_output(f"gsutil -m ls {args.output_dir}/*.deidentify_output.sorted.bam", shell=True, encoding="UTF-8").strip().split("\n")
+    logging.info(f"Processing {len(df)} samples")
+    for i, (_, row) in tqdm(enumerate(df.iterrows()), unit=" samples"):
+        if args.offset and i < args.offset:
+            continue
+        if args.n and i >= args.offset + args.n:
+            break
 
-    hl.init(log="/dev/null")
-    with batch_utils.run_batch(args, batch_name=f"deidentify bamouts: {len(df)} samples") as batch:
-        for _, row in tqdm.tqdm(df.iterrows(), unit=" samples"):
-            output_bam_path = os.path.join(args.output_dir, f"{row.sample_id}.deidentify_output.bam")
-            output_sorted_bam_path = os.path.join(args.output_dir, f"{row.sample_id}.deidentify_output.sorted.bam")
+        s1 = bp.new_step(
+            f"run HaplotypeCaller: {row.sample_id}",
+            arg_suffix=f"step1",
+            image=DOCKER_IMAGE,
+            step_number=1,
+            cpu=0.25,
+            memory="lowmem",
+            localize_by=Localize.HAIL_BATCH_CLOUDFUSE,
+            delocalize_by=Delocalize.COPY,
+            output_dir=args.output_dir,
+            all_outputs_precached=True)
 
-            if args.sample_to_process or args.num_samples_to_process:
-                run_deidentify = args.force or not hl.hadoop_is_file(output_bam_path)
-                run_sort = run_deidentify or not hl.hadoop_is_file(output_sorted_bam_path)
-            else:
-                run_deidentify = args.force or output_bam_path not in existing_deidentify_output_bams
-                run_sort = run_deidentify or output_sorted_bam_path not in existing_deidentify_output_sorted_bams
+        local_tsv_path = s1.input(row.variants_tsv_bgz)
+        local_bamout_path, _ = s1.inputs(row.output_bamout_bam, row.output_bamout_bai)
 
-            if run_deidentify or run_sort:
-                bamout_stat = hl.hadoop_stat(row.output_bamout_bam)
-                cpu = 0.25
-                if bamout_stat['size_bytes'] > 0.25 * 20_000_000_000:
-                    cpu = 0.5
-                if bamout_stat['size_bytes'] > 0.5 * 20_000_000_000:
-                    cpu = 1
-                if bamout_stat['size_bytes'] > 1 * 20_000_000_000:
-                    cpu = 2
-
-            if run_deidentify:
-                j = batch_utils.init_job(batch, f"{row.sample_id} - deidentify - cpu:{cpu}", DOCKER_IMAGE if not args.raw else None, cpu=cpu, disk_size=21*cpu)
-                batch_utils.switch_gcloud_auth_to_user_account(j, GCLOUD_CREDENTIALS_LOCATION, GCLOUD_USER_ACCOUNT)
-
-                local_tsv_path = batch_utils.localize_file(j, row.variants_tsv_bgz, use_gcsfuse=True)
-                local_exclude_tsv_path = batch_utils.localize_file(j, row.exclude_variants_tsv_bgz, use_gcsfuse=True)
-                local_bamout_path = batch_utils.localize_file(j, row.output_bamout_bam, use_gcsfuse=True)
-
-                batch_utils.localize_file(j, row.output_bamout_bai, use_gcsfuse=True)
-
-                j.command(f"""echo --------------
-
-echo "Start - time: $(date)"
-df -kh
-
+        s1.command(f"""echo --------------
 cat <<EOF > deidentify_bamout.py
 {deidentify_bamouts_script}
 EOF
 
-time python3 deidentify_bamout.py -x "{local_exclude_tsv_path}" "{row.sample_id}" "{local_bamout_path}" "{local_tsv_path}"
+time python3 deidentify_bamout.py "{row.sample_id}" "{local_bamout_path}" "{local_tsv_path}"
 
+samtools sort -o "{row.sample_id}.deidentified.sorted.bam" "{row.sample_id}.deidentified.bam"
+mv "{row.sample_id}.deidentified.sorted.bam" "{row.sample_id}.deidentified.bam"
+samtools index "{row.sample_id}.deidentified.bam"
 ls -lh
-
-gsutil -m cp "{row.sample_id}.deidentify_output.bam" {args.output_dir}/
-gsutil -m cp "{row.sample_id}.deidentify_output.db"  {args.output_dir}/
-
-echo --------------; free -h; df -kh; uptime; set +xe; echo "Done - time: $(date)"; echo --------------
-
 """)
-            else:
-                logger.info(f"Skipping deidentify {row.sample_id}...")
+        s1.output(f"{row.sample_id}.deidentified.db")
+        s1.output(f"{row.sample_id}.deidentified.bam")
+        s1.output(f"{row.sample_id}.deidentified.bam.bai")
 
-            if run_sort:
-                j2 = batch_utils.init_job(batch, f"{row.sample_id} - sort - cpu:{cpu}", DOCKER_IMAGE if not args.raw else None, cpu=cpu)
-                batch_utils.switch_gcloud_auth_to_user_account(j2, GCLOUD_CREDENTIALS_LOCATION, GCLOUD_USER_ACCOUNT)
-
-                if run_deidentify:
-                    j2.depends_on(j)
-
-                local_bamout_path = batch_utils.localize_file(j2, output_bam_path, use_gcsfuse=True)
-
-                j2.command(f"""echo --------------
-
-echo "Start - time: $(date)"
-df -kh
-
-samtools sort -o "{row.sample_id}.deidentify_output.sorted.bam" "{local_bamout_path}"
-samtools index "{row.sample_id}.deidentify_output.sorted.bam"
-
-ls -lh
-
-gsutil -m cp "{row.sample_id}.deidentify_output.sorted.bam"      {args.output_dir}/
-gsutil -m cp "{row.sample_id}.deidentify_output.sorted.bam.bai"  {args.output_dir}/
-
-echo --------------; free -h; df -kh; uptime; set +xe; echo "Done - time: $(date)"; echo --------------
-
-""")
-            elif run_sort:
-                logger.info(f"Sorted output files exist (eg. {output_sorted_bam_path}). Skipping sort for {row.sample_id}...")
+    bp.run()
 
 
 if __name__ == "__main__":
