@@ -7,13 +7,21 @@ import subprocess
 logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+#all_tsvs_path = "gs://gnomad-readviz/v4.0/readviz_tsvs/*.tsv.bgz"
+#all_bamouts_path = "gs://gnomad-readviz/v4.0/bamout/*.bam"
+#output_filename = "cram_and_tsv_paths_table_for_step7.tsv.gz"
+
+all_tsvs_path = "gs://gnomad-readviz/ukbb/per_sample_tsv/*.tsv.bgz"
+all_bamouts_path = "gs://gnomad-readviz/ukbb/haplotypecaller/outputs/*.bamout.bam"
+output_filename = "cram_and_tsv_paths_table_for_step7_from_UKBB.tsv.gz"
+
 #%%
-all_bamouts = subprocess.check_output("gsutil -m ls gs://gnomad-readviz/v4.0/bamout/*.bam", shell=True, encoding="UTF-8")
+all_bamouts = subprocess.check_output(f"gsutil -m ls {all_bamouts_path}", shell=True, encoding="UTF-8")
 all_bamouts = all_bamouts.strip().split("\n")
 all_bamouts_by_sample_id = {os.path.basename(p).replace(".bamout.bam", ""): p for p in all_bamouts}
 #%%
 
-all_tsvs = subprocess.check_output("gsutil ls gs://gnomad-readviz/v4.0/readviz_tsvs/*.tsv.bgz", shell=True, encoding="UTF-8")
+all_tsvs = subprocess.check_output(f"gsutil ls {all_tsvs_path}", shell=True, encoding="UTF-8")
 all_tsvs = all_tsvs.strip().split("\n")
 all_tsvs_by_sample_id = {os.path.basename(p).replace(".tsv.bgz", ""): p for p in all_tsvs}
 
@@ -41,8 +49,8 @@ for sample_id in sample_ids:
     })
 
 df = pd.DataFrame(output_table)
-df.to_csv("cram_and_tsv_paths_table_for_step7.tsv.gz", header=True, index=False, sep="\t")
-subprocess.check_call("gsutil -m cp cram_and_tsv_paths_table_for_step7.tsv.gz gs://gnomad-readviz/v4.0/", shell=True)
+df.to_csv(output_filename, header=True, index=False, sep="\t")
+subprocess.check_call(f"gsutil -m cp {output_filename} gs://gnomad-readviz/v4.0/", shell=True)
 
-print("Wrote gs://gnomad-readviz/v4.0/cram_and_tsv_paths_table_for_step7.tsv.gz")
+print(f"Wrote gs://gnomad-readviz/v4.0/{output_filename}")
 #%%
