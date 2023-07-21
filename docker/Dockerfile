@@ -107,6 +107,7 @@ COPY --from=broadinstitute/gatk:4.1.4.1 /gatk/gatk-package-4.1.4.1-local.jar /ga
 COPY --from=broadinstitute/gatk:4.1.8.0 /gatk/gatk-package-4.1.8.0-local.jar /gatk/gatk-v4.1.8.0.jar
 
 COPY --from=weisburd/base-other-tools:latest /usr/local/bin/bedtools /usr/local/bin/bedtools
-RUN bedtools --version
+
+COPY deidentify_bamout.py /deidentify_bamout.py
 
 ENTRYPOINT ["/bin/bash"]

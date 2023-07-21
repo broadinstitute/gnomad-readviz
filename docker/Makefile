@@ -7,7 +7,8 @@ PWD=`pwd`
 all: build push update_scripts
 
 build:
-	docker build -t $(TAG1) -t $(TAG2) .
+	cd ..
+	docker build -t $(TAG1) -t $(TAG2) -f docker/Dockerfile .
 
 push:
 	docker push $(TAG1)
