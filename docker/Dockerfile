@@ -81,9 +81,9 @@ RUN wget https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud
 ENV PATH=/google-cloud-sdk/bin:$PATH
 
 # install sqlite3
-RUN wget https://www.sqlite.org/2020/sqlite-autoconf-3330000.tar.gz \
-    && tar xzf sqlite-autoconf-3330000.tar.gz \
-    && cd sqlite-autoconf-3330000 \
+RUN wget https://www.sqlite.org/2020/sqlite-autoconf-3420000.tar.gz \
+    && tar xzf sqlite-autoconf-3420000.tar.gz \
+    && cd sqlite-autoconf-3420000 \
     && ./configure --prefix=/usr/local \
     && make \
     && make install \
@@ -108,3 +108,5 @@ COPY --from=broadinstitute/gatk:4.1.8.0 /gatk/gatk-package-4.1.8.0-local.jar /ga
 
 COPY --from=weisburd/base-other-tools:latest /usr/local/bin/bedtools /usr/local/bin/bedtools
 RUN bedtools --version
+
+ENTRYPOINT ["/bin/bash"]
