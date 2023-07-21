@@ -14,7 +14,7 @@ logging.basicConfig(
 logger = logging.getLogger("deidentify bamouts")
 logger.setLevel(logging.INFO)
 
-DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:555a77391da1ce4b7a77615f830e9a566d7c3d018902b5b8af2f50ecf071f1c7"
+DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:3040162c16c0e84f919ef49b7f086ddf3baa0e88ba6563c9712fa1457134b4cd"
 
 OUTPUT_BUCKET = "gs://gnomad-readviz/v4.0/deidentified_bamout"
 
