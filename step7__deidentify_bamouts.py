@@ -48,6 +48,10 @@ def parse_args(batch_pipeline):
         help="Randomly select -n samples",
         action="store_true")
     p.add_argument(
+        "--tsv-has-header",
+        help="The input tsv files have a header line",
+        action="store_true")
+    p.add_argument(
         "tsv_and_bamout_paths_table",
         help="A text file containing at least these columns: "
              "sample_id, output_bamout_bam, output_bamout_bai, variants_tsv_bgz")
@@ -109,8 +113,10 @@ def main():
 #{deidentify_bamouts_script}
 #EOF""")
 
+        tsv_has_header = "--tsv-has-header" if args.tsv_has_header else ""
+
         s1.command(f"""echo --------------
-time python3 /deidentify_bamout.py "{row.sample_id}" "{local_bamout_path}" "{local_tsv_path}"
+time python3 /deidentify_bamout.py {tsv_has_header} "{row.sample_id}" "{local_bamout_path}" "{local_tsv_path}"
 
 samtools sort -o "{row.sample_id}.deidentified.sorted.bam" "{row.sample_id}.deidentified.bam"
 mv "{row.sample_id}.deidentified.sorted.bam" "{row.sample_id}.deidentified.bam"
