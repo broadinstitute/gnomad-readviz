@@ -343,15 +343,13 @@ def write_to_database(sample_id, db_record_iterator):
 def main():
     args = parse_args()
 
-    if args.tsv_has_header:
-        parse_tsv = parse_tsv_with_header
-
+    parse_tsv_func = parse_tsv_with_header if args.tsv_has_header else parse_tsv
     tsv_records_to_skip = None
     if args.input_tsv_path_of_variants_to_skip:
-        tsv_records_to_skip = set(parse_tsv(args.input_tsv_path_of_variants_to_skip, progress_bar=True))
+        tsv_records_to_skip = set(parse_tsv_func(args.input_tsv_path_of_variants_to_skip, progress_bar=True))
 
     # assemble pipeline
-    tsv_record_iterator = sorted(parse_tsv(args.input_tsv_path, progress_bar=False), key=tsv_record_order)
+    tsv_record_iterator = sorted(parse_tsv_func(args.input_tsv_path, progress_bar=False), key=tsv_record_order)
 
     combined_bam_generator = generate_deidentified_bam(
         args.sample_id, args.input_bam_path, tsv_record_iterator, tsv_records_to_skip=tsv_records_to_skip)
