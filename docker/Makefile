@@ -15,5 +15,5 @@ push:
 
 update_scripts:
 	cd .. \
-		&& cat docker/sha256.txt && [ ! -z "`cat docker/sha256.txt`" ] && sed -i.bak "s/${DOCKER_IMAGE_NAME}@sha256:[^\"]*/"${DOCKER_IMAGE_NAME}@`cat docker/sha256.txt`"/"  *run_haplotype_caller*.py \
-		&& rm  *run_haplotype_caller*.py.bak
+		&& cat docker/sha256.txt && [ ! -z "`cat docker/sha256.txt`" ] && sed -i.bak "s/${DOCKER_IMAGE_NAME}@sha256:[^\"]*/"${DOCKER_IMAGE_NAME}@`cat docker/sha256.txt`"/"  *step[5-8]*.py \
+		&& rm  *step[5-8]*.py.bak
