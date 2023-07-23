@@ -23,7 +23,7 @@ GCLOUD_PROJECT = "broad-mpg-gnomad"
 GCLOUD_USER_ACCOUNT = "weisburd@broadinstitute.org"
 GCLOUD_CREDENTIALS_LOCATION = "gs://weisburd-misc/creds"
 
-DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:d714ca26326aa21340de3980f86dcd1020d57de3dcbff691abdc6a0bac50921f"
+DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:c8f02e79221d643dcdbfb0d73e7e28bb6ba9ee7e6d108382b1cf0f35d3dab86c"
 
 #INPUT_BAM_BUCKET = "gs://gnomad-bw2/gnomad_all_readviz_bamout_deidentified"
 INPUT_BAM_BUCKET = "gs://gnomad-bw2/gnomad_all_readviz_bamout_deidentified_v3_and_v31_fixed__20210101"
