@@ -19,7 +19,7 @@ from step_pipeline import pipeline, Backend, Localize, Delocalize
 logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:c8f02e79221d643dcdbfb0d73e7e28bb6ba9ee7e6d108382b1cf0f35d3dab86c"
+DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:aaad6b9f76badabe41b2f74e7445fe9cd7b61b41770d7a7c1b8e360e0f97b66a"
 
 INPUT_DEIDENTIFIED_BAMS_DIR = "gs://gnomad-readviz/v4.0/deidentified_bamout"
 LOCAL_TEMP_DIR = "sqlite_queries"
