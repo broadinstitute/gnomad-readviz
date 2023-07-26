@@ -1,8 +1,6 @@
-import hail as hl   # used for hadoop file utils
 import logging
 import os
 import pandas as pd
-import subprocess
 from tqdm import tqdm
 
 from step_pipeline import pipeline, Backend, Localize, Delocalize
@@ -53,7 +51,7 @@ def parse_args(batch_pipeline):
         action="store_true")
     p.add_argument(
         "tsv_and_bamout_paths_table",
-        help="A text file containing at least these columns: "
+        help="A text file containing at least four columns: "
              "sample_id, output_bamout_bam, output_bamout_bai, variants_tsv_bgz")
     args = p.parse_args()
 
