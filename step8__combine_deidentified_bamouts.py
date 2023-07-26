@@ -125,11 +125,7 @@ def combine_bam_files_in_group(bp, args, combined_bamout_id, group, input_bam_si
         logger.error(f"ERROR in group {combined_bamout_id}: {e}. Unable to combine bams for group {combined_bamout_id}. Skipping...")
         return 1
 
-    cpu = 0.25
-    if total_bam_size > 0.25 * 20_000_000_000:
-        cpu = 0.5
-    if total_bam_size > 0.5 * 20_000_000_000:
-        cpu = 1
+    cpu = 1
     if total_bam_size > 1 * 20_000_000_000:
         cpu = 2
     if total_bam_size > 2 * 20_000_000_000:
@@ -188,26 +184,11 @@ def combine_db_files_in_group_for_chrom(
         combined_bamout_id,
         group,
         chrom_to_combine_db_steps,
-        input_db_size_dict,
         existing_combined_dbs,
         skip_creating_sql_files=False,
         remote_temp_dir=TEMP_BUCKET):
 
-    # check how much disk will be needed
-    try:
-        chr1_db_size_estimate = 0
-        for sample_id in group:
-            chr1_db_size_estimate += input_db_size_dict[f"{args.input_bams_dir}/{sample_id}.deidentified.db"] * 0.1  # multipy by 0.1 because chr1 is < 10% of the genome
-
-    except Exception as e:
-        logger.error(f"ERROR in group {combined_bamout_id}: {e}. Unable to combine dbs for group {combined_bamout_id}. Skipping...")
-        return 1
-
     for chrom in ALL_CHROMOSOMES:
-        cpu = 0.5
-        if chr1_db_size_estimate > 0.5 * 20_000_000_000:
-            cpu = 1
-
         combined_db_filename = f"{combined_bamout_id}.chr{chrom}.db"
         output_db_path = os.path.join(args.output_dir, combined_db_filename)
         if args.db_names_to_process and combined_db_filename not in args.db_names_to_process:
@@ -217,6 +198,7 @@ def combine_db_files_in_group_for_chrom(
             logger.info(f"Combined db already exists: {output_db_path}. Skipping combine db step for {combined_bamout_id}...")
             continue
 
+        cpu = 0.25
         s2 = bp.new_step(
             f"combine dbs (cpu: {cpu}): {combined_db_filename}",
             arg_suffix=f"step2",
@@ -351,8 +333,8 @@ def main():
 
         if not args.skip_step2:
             errors += combine_db_files_in_group_for_chrom(
-                bp, args, combined_bamout_id, group, chrom_to_combine_db_steps, input_bam_and_db_size_dict,
-                existing_combined_dbs, skip_creating_sql_files=args.skip_creating_sql_files, remote_temp_dir=TEMP_BUCKET)
+                bp, args, combined_bamout_id, group, chrom_to_combine_db_steps, existing_combined_dbs,
+                skip_creating_sql_files=args.skip_creating_sql_files, remote_temp_dir=TEMP_BUCKET)
 
     if not args.skip_step3 and not errors:
         # only do this after processing all groups
