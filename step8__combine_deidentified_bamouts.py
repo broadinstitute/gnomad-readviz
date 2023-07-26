@@ -1,5 +1,6 @@
 import collections
 from datetime import datetime
+import gzip
 import hashlib
 import json
 import logging
@@ -39,10 +40,11 @@ def parse_args(batch_pipeline):
     p.add_argument("-g", "--group-size", type=int, help="How many samples to include in each group.", default=DEFAULT_GROUP_SIZE)
     p.add_argument("-n", "--num-groups-to-process", type=int, help="For testing, process only the given sample id(s).")
     p.add_argument("-d", "--db-names-to-process", action="append", help="Process only the given dbs")
-    pipeline_group = p.add_argument_group("skip steps")
-    pipeline_group.add_argument("--skip-step1", action="store_true", help="Skip the step that combines bams in a group")
-    pipeline_group.add_argument("--skip-step2", action="store_true", help="Skip the step that combines dbs in a group")
-    pipeline_group.add_argument("--skip-step3", action="store_true", help="Skip the step that combines all dbs from step2 into a single db for each chromosome")
+    skip_steps_group = p.add_argument_group("skip steps")
+    skip_steps_group.add_argument("--skip-creating-sql-files", action="store_true", help="Skip the step writes .sql.gz files and uploads them to a temp bucket")
+    skip_steps_group.add_argument("--skip-step1", action="store_true", help="Skip the step that combines bams in a group")
+    skip_steps_group.add_argument("--skip-step2", action="store_true", help="Skip the step that combines dbs in a group")
+    skip_steps_group.add_argument("--skip-step3", action="store_true", help="Skip the step that combines all dbs from step2 into a single db for each chromosome")
 
     args = batch_pipeline.parse_known_args()
 
@@ -50,7 +52,7 @@ def parse_args(batch_pipeline):
 
 
 def add_command_to_combine_dbs(
-        step, output_db_filename, input_db_paths, select_chrom=None, set_combined_bamout_id=None, create_index=False, remote_temp_dir=TEMP_BUCKET):
+        step, output_db_filename, input_db_paths, select_chrom=None, set_combined_bamout_id=None, create_index=False, skip_creating_sql_files=False, remote_temp_dir=TEMP_BUCKET):
 
     sqlite_queries = []
     sqlite_queries.append('CREATE TABLE "variants" ('
@@ -85,24 +87,24 @@ def add_command_to_combine_dbs(
     sqlite_queries = "\n".join(sqlite_queries)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    sqlite_queries_filename = f"sqlite_queries__{output_db_filename}__merge_{len(input_db_paths)}_dbs__{timestamp}.sql"
+    sqlite_queries_filename = f"sqlite_queries__{output_db_filename}__merge_{len(input_db_paths)}_dbs__{timestamp}.sql.gz"
 
-    local_temp_dir = "sqlite_queries"
-    if not os.path.isdir(local_temp_dir):
-        os.mkdir(local_temp_dir)
-    with open(os.path.join(LOCAL_TEMP_DIR, sqlite_queries_filename), "wt") as f:
-        f.write(sqlite_queries)
+    if not skip_creating_sql_files:
+        local_temp_dir = "sqlite_queries"
+        if not os.path.isdir(local_temp_dir):
+            os.mkdir(local_temp_dir)
+        with gzip.open(os.path.join(LOCAL_TEMP_DIR, sqlite_queries_filename), "wt") as f:
+            f.write(sqlite_queries)
 
     local_sqlite_queries_file_path = step.input(os.path.join(remote_temp_dir, LOCAL_TEMP_DIR, sqlite_queries_filename))
-
     step.command(f"""echo --------------
+set -x
 echo "Start - time: $(date)"
-df -kh
 ls -lh
-
-wc  -l {local_sqlite_queries_file_path}
-
-time sqlite3 {output_db_filename} < {local_sqlite_queries_file_path}
+zcat {local_sqlite_queries_file_path} | wc  -l 
+gunzip {local_sqlite_queries_file_path}
+time sqlite3 {output_db_filename} < {re.sub('.gz$', '', str(local_sqlite_queries_file_path))}
+ls -lh
 echo Done - time: $(date)
 """)
 
@@ -188,6 +190,7 @@ def combine_db_files_in_group_for_chrom(
         chrom_to_combine_db_steps,
         input_db_size_dict,
         existing_combined_dbs,
+        skip_creating_sql_files=False,
         remote_temp_dir=TEMP_BUCKET):
 
     # check how much disk will be needed
@@ -240,13 +243,14 @@ def combine_db_files_in_group_for_chrom(
             select_chrom=chrom,
             set_combined_bamout_id=combined_bamout_id,
             create_index=False,
+            skip_creating_sql_files=skip_creating_sql_files,
             remote_temp_dir=remote_temp_dir)
         s2.output(combined_db_filename)
 
     return 0
 
 
-def combine_all_dbs_for_chrom(bp, args, output_filename_prefix, chrom_to_combined_db_paths, chrom_to_combine_db_steps, remote_temp_dir=TEMP_BUCKET):
+def combine_all_dbs_for_chrom(bp, args, output_filename_prefix, chrom_to_combined_db_paths, chrom_to_combine_db_steps, skip_creating_sql_files=False, remote_temp_dir=TEMP_BUCKET):
     for chrom, combined_db_paths in chrom_to_combined_db_paths.items():
         output_filename = f"all_variants_{output_filename_prefix}.chr{chrom}.db"
         combine_db_steps = chrom_to_combine_db_steps[chrom]
@@ -273,6 +277,7 @@ def combine_all_dbs_for_chrom(bp, args, output_filename_prefix, chrom_to_combine
             select_chrom=None,
             set_combined_bamout_id=None,
             create_index=True,
+            skip_creating_sql_files=skip_creating_sql_files,
             remote_temp_dir=remote_temp_dir)
         s3.output(output_filename)
 
@@ -346,14 +351,16 @@ def main():
 
         if not args.skip_step2:
             errors += combine_db_files_in_group_for_chrom(
-                bp, args, combined_bamout_id, group, chrom_to_combine_db_steps, input_bam_and_db_size_dict, existing_combined_dbs, remote_temp_dir=TEMP_BUCKET)
+                bp, args, combined_bamout_id, group, chrom_to_combine_db_steps, input_bam_and_db_size_dict,
+                existing_combined_dbs, skip_creating_sql_files=args.skip_creating_sql_files, remote_temp_dir=TEMP_BUCKET)
 
     if not args.skip_step3 and not errors:
         # only do this after processing all groups
         combine_all_dbs_for_chrom(
-            bp, args, f"s{len(sample_ids)}_gs{args.group_size}_gn{num_groups}", chrom_to_combined_db_paths, chrom_to_combine_db_steps, remote_temp_dir=TEMP_BUCKET)
+            bp, args, f"s{len(sample_ids)}_gs{args.group_size}_gn{num_groups}", chrom_to_combined_db_paths,
+            chrom_to_combine_db_steps, skip_creating_sql_files=args.skip_creating_sql_files, remote_temp_dir=TEMP_BUCKET)
 
-    if not args.skip_step2 or not args.skip_step3:
+    if (not args.skip_step2 or not args.skip_step3) and not args.skip_creating_sql_files and not args.group_size:
         os.system(f"gsutil -m cp -r {LOCAL_TEMP_DIR} {TEMP_BUCKET}")
 
     bp.run()
