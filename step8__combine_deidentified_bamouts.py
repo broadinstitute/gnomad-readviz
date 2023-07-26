@@ -1,7 +1,5 @@
 import collections
-import tempfile
 from datetime import datetime
-import hailtop.fs as hfs
 import hashlib
 import json
 import logging
@@ -26,7 +24,7 @@ LOCAL_TEMP_DIR = "sqlite_queries"
 TEMP_BUCKET = "gs://bw2-delete-after-15-days"
 OUTPUT_DIR = "gs://gnomad-readviz/v4.0/combined_deidentified_bamout"
 
-DEFAULT_GROUP_SIZE = 500
+DEFAULT_GROUP_SIZE = 500  # as a rule of thumb, total samples / group size should approximately be between 1000 and 1500
 ALL_CHROMOSOMES = [str(c) for c in range(1, 23)] + ["X", "Y", "M"]
 
 
@@ -95,9 +93,7 @@ def add_command_to_combine_dbs(
     with open(os.path.join(LOCAL_TEMP_DIR, sqlite_queries_filename), "wt") as f:
         f.write(sqlite_queries)
 
-    sqlite_queries_temp_google_bucket_path = os.path.join(remote_temp_dir, LOCAL_TEMP_DIR, sqlite_queries_filename)
-
-    local_sqlite_queries_file_path = step.input(sqlite_queries_temp_google_bucket_path)
+    local_sqlite_queries_file_path = step.input(os.path.join(remote_temp_dir, LOCAL_TEMP_DIR, sqlite_queries_filename))
 
     step.command(f"""echo --------------
 echo "Start - time: $(date)"
@@ -107,6 +103,7 @@ ls -lh
 wc  -l {local_sqlite_queries_file_path}
 
 time sqlite3 {output_db_filename} < {local_sqlite_queries_file_path}
+echo Done - time: $(date)
 """)
 
 
@@ -188,7 +185,7 @@ def combine_db_files_in_group_for_chrom(
         args,
         combined_bamout_id,
         group,
-        chrom_to_combine_db_jobs,
+        chrom_to_combine_db_steps,
         input_db_size_dict,
         existing_combined_dbs,
         remote_temp_dir=TEMP_BUCKET):
@@ -204,9 +201,7 @@ def combine_db_files_in_group_for_chrom(
         return 1
 
     for chrom in ALL_CHROMOSOMES:
-        cpu = 0.25
-        if chr1_db_size_estimate > 0.25 * 20_000_000_000:
-            cpu = 0.5
+        cpu = 0.5
         if chr1_db_size_estimate > 0.5 * 20_000_000_000:
             cpu = 1
 
@@ -231,7 +226,7 @@ def combine_db_files_in_group_for_chrom(
             add_skip_command_line_args=False,
             all_outputs_precached=True)
 
-        chrom_to_combine_db_jobs[chrom].append(s2)
+        chrom_to_combine_db_steps[chrom].append(s2)
 
         local_input_db_paths = []
         for sample_id in group:
@@ -251,10 +246,10 @@ def combine_db_files_in_group_for_chrom(
     return 0
 
 
-def combine_all_dbs_for_chrom(bp, args, output_filename_prefix, chrom_to_combined_db_paths, chrom_to_combine_db_jobs, remote_temp_dir=TEMP_BUCKET):
+def combine_all_dbs_for_chrom(bp, args, output_filename_prefix, chrom_to_combined_db_paths, chrom_to_combine_db_steps, remote_temp_dir=TEMP_BUCKET):
     for chrom, combined_db_paths in chrom_to_combined_db_paths.items():
         output_filename = f"all_variants_{output_filename_prefix}.chr{chrom}.db"
-        combine_db_jobs = chrom_to_combine_db_jobs[chrom]
+        combine_db_steps = chrom_to_combine_db_steps[chrom]
 
         s3 = bp.new_step(
             f"combine all dbs: {output_filename}",
@@ -281,7 +276,7 @@ def combine_all_dbs_for_chrom(bp, args, output_filename_prefix, chrom_to_combine
             remote_temp_dir=remote_temp_dir)
         s3.output(output_filename)
 
-        for s2 in combine_db_jobs:
+        for s2 in combine_db_steps:
             s3.depends_on(s2)
 
 
@@ -334,7 +329,7 @@ def main():
     bp.name = f"combine readviz bams: {len(groups)} group(s) (gs{args.group_size}_gn{num_groups}__s{len(all_sample_ids)})"
 
     # process each group
-    chrom_to_combine_db_jobs = collections.defaultdict(list)
+    chrom_to_combine_db_steps = collections.defaultdict(list)
     chrom_to_combined_db_paths = collections.defaultdict(list)
     errors = 0
     print("Processing sample id groups:")
@@ -351,11 +346,12 @@ def main():
 
         if not args.skip_step2:
             errors += combine_db_files_in_group_for_chrom(
-                bp, args, combined_bamout_id, group, chrom_to_combine_db_jobs, input_bam_and_db_size_dict, existing_combined_dbs, remote_temp_dir=TEMP_BUCKET)
+                bp, args, combined_bamout_id, group, chrom_to_combine_db_steps, input_bam_and_db_size_dict, existing_combined_dbs, remote_temp_dir=TEMP_BUCKET)
 
-    if not args.skip_step3 and not args.num_groups_to_process and not errors:
+    if not args.skip_step3 and not errors:
         # only do this after processing all groups
-        combine_all_dbs_for_chrom(bp, args, f"s{len(sample_ids)}_gs{args.group_size}_gn{num_groups}", chrom_to_combined_db_paths, chrom_to_combine_db_jobs, remote_temp_dir=TEMP_BUCKET)
+        combine_all_dbs_for_chrom(
+            bp, args, f"s{len(sample_ids)}_gs{args.group_size}_gn{num_groups}", chrom_to_combined_db_paths, chrom_to_combine_db_steps, remote_temp_dir=TEMP_BUCKET)
 
     if not args.skip_step2 or not args.skip_step3:
         os.system(f"gsutil -m cp -r {LOCAL_TEMP_DIR} {TEMP_BUCKET}")
