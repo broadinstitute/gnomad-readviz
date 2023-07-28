@@ -25,9 +25,8 @@ LOCAL_TEMP_DIR = "sqlite_queries"
 TEMP_BUCKET = "gs://bw2-delete-after-15-days"
 OUTPUT_DIR = "gs://gnomad-readviz/v4.0/combined_deidentified_bamout"
 
-DEFAULT_GROUP_SIZE = 500  # as a rule of thumb, total samples / group size should approximately be between 1000 and 1500
+DEFAULT_GROUP_SIZE = 800  # as a rule of thumb, total samples / group size should approximately be between 1000 and 1500
 ALL_CHROMOSOMES = [str(c) for c in range(1, 23)] + ["X", "Y", "M"]
-
 
 def parse_args(batch_pipeline):
     """Parse command line args."""
@@ -101,9 +100,11 @@ def add_command_to_combine_dbs(
 set -x
 echo "Start - time: $(date)"
 ls -lh
-zcat {local_sqlite_queries_file_path} | wc  -l 
-gunzip {local_sqlite_queries_file_path}
-time sqlite3 {output_db_filename} < {re.sub('.gz$', '', str(local_sqlite_queries_file_path))}
+cp {local_sqlite_queries_file_path} . 
+ls -lh
+gunzip {local_sqlite_queries_file_path.filename}
+
+time sqlite3 {output_db_filename} < {re.sub('.gz$', '', str(local_sqlite_queries_file_path.filename))}
 ls -lh
 echo Done - time: $(date)
 """)
@@ -139,6 +140,7 @@ def combine_bam_files_in_group(bp, args, combined_bamout_id, group, input_bam_si
         cpu=cpu,
         localize_by=Localize.HAIL_BATCH_CLOUDFUSE,
         delocalize_by=Delocalize.COPY,
+        timeout=2*60*60,  # 2 hours
         output_dir=args.output_dir,
         add_skip_command_line_args=False,
         all_outputs_precached=True)
@@ -205,6 +207,7 @@ def combine_db_files_in_group_for_chrom(
             image=DOCKER_IMAGE,
             step_number=2,
             cpu=cpu,
+            timeout=60*60,  # 60 minutes
             localize_by=Localize.HAIL_BATCH_CLOUDFUSE,
             delocalize_by=Delocalize.COPY,
             output_dir=args.output_dir,
@@ -243,6 +246,7 @@ def combine_all_dbs_for_chrom(bp, args, output_filename_prefix, chrom_to_combine
             image=DOCKER_IMAGE,
             step_number=3,
             cpu=2,
+            timeout=60*60,  # 60 minutes
             localize_by=Localize.HAIL_BATCH_CLOUDFUSE,
             delocalize_by=Delocalize.COPY,
             output_dir=args.output_dir,
@@ -285,12 +289,11 @@ def main():
 
     print(f"Read {len(input_bam_and_db_size_dict)} input bam/db paths from cache file: {cache_filename}")
     all_sample_ids = {
-        re.sub(".deidentified(.bam|.db|.bam.bai)?$", "", os.path.basename(p)) for p in input_bam_and_db_size_dict.keys()
+        re.sub(".deidentified(.bam|.db|.bam.bai)$", "", os.path.basename(p)) for p in input_bam_and_db_size_dict.keys()
     }
     all_sample_ids = list(sorted(all_sample_ids))
 
-
-    num_groups = int(math.ceil(len(all_sample_ids)/args.group_size))
+    num_groups = int(math.floor(len(all_sample_ids)/args.group_size))
     logging.info(f"Creating {num_groups} group(s) with {args.group_size} samples in each")
 
     groups = []
@@ -342,7 +345,7 @@ def main():
             bp, args, f"s{len(sample_ids)}_gs{args.group_size}_gn{num_groups}", chrom_to_combined_db_paths,
             chrom_to_combine_db_steps, skip_creating_sql_files=args.skip_creating_sql_files, remote_temp_dir=TEMP_BUCKET)
 
-    if (not args.skip_step2 or not args.skip_step3) and not args.skip_creating_sql_files and not args.group_size:
+    if (not args.skip_step2 or not args.skip_step3) and not args.skip_creating_sql_files:
         os.system(f"gsutil -m cp -r {LOCAL_TEMP_DIR} {TEMP_BUCKET}")
 
     bp.run()
