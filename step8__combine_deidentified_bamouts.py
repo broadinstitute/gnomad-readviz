@@ -300,11 +300,7 @@ def main():
     for i in range(num_groups):
         if args.num_groups_to_process and i >= args.num_groups_to_process:
             break
-        group = all_sample_ids[i::num_groups]
-        groups.append(group)
-
-        #logging.info(f"--- group #{i}:")
-        #logging.info(group)
+        groups.append(all_sample_ids[i::num_groups])
 
     if not args.skip_step1:
         existing_combined_bamout_bams = {
@@ -332,11 +328,11 @@ def main():
 
         if not args.skip_step1 and not args.db_names_to_process:
             errors += combine_bam_files_in_group(
-                bp, args, combined_bamout_id, group, input_bam_and_db_size_dict, existing_combined_bamout_bams)
+                bp, args, combined_bamout_id, sample_ids, input_bam_and_db_size_dict, existing_combined_bamout_bams)
 
         if not args.skip_step2:
             errors += combine_db_files_in_group_for_chrom(
-                bp, args, combined_bamout_id, group, chrom_to_combine_db_steps, existing_combined_dbs,
+                bp, args, combined_bamout_id, sample_ids, chrom_to_combine_db_steps, existing_combined_dbs,
                 skip_creating_sql_files=args.skip_creating_sql_files, remote_temp_dir=TEMP_BUCKET)
 
     if not args.skip_step3 and not errors:
