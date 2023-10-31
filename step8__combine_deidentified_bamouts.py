@@ -18,7 +18,7 @@ from step_pipeline import pipeline, Backend, Localize, Delocalize
 logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:aaad6b9f76badabe41b2f74e7445fe9cd7b61b41770d7a7c1b8e360e0f97b66a"
+DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:2b8c932cb8868ba9590f0a6183bcda4d29bd3b8e9e818ad9b3f2b9c4caa8d8bc"
 
 INPUT_DEIDENTIFIED_BAMS_DIR = "gs://gnomad-readviz/v4.0/deidentified_bamout"
 LOCAL_TEMP_DIR = "sqlite_queries"
@@ -138,7 +138,8 @@ def combine_bam_files_in_group(bp, args, combined_bamout_id, group, input_bam_si
         image=DOCKER_IMAGE,
         step_number=1,
         cpu=cpu,
-        localize_by=Localize.HAIL_BATCH_CLOUDFUSE,
+        storage=f"{(2*total_bam_size//10**9) + 30}Gi",
+        localize_by=Localize.COPY,
         delocalize_by=Delocalize.COPY,
         timeout=2*60*60,  # 2 hours
         output_dir=args.output_dir,
@@ -149,34 +150,28 @@ def combine_bam_files_in_group(bp, args, combined_bamout_id, group, input_bam_si
     picard_merge_bam_inputs = ""
     for sample_id in group:
         local_input_bam_path = s1.input(f"{args.input_bams_dir}/{sample_id}.deidentified.bam")
-        for_loop_bam_list += f" '{local_input_bam_path}'"
+        local_input_bai_path = s1.input(f"{args.input_bams_dir}/{sample_id}.deidentified.bam.bai")
+        for_loop_bam_list += f" '{local_input_bam_path}' '{local_input_bai_path}' "
         picard_merge_bam_inputs += f" -I '{os.path.basename(str(local_input_bam_path)).replace(' ', '_').replace(':', '_')}' "
 
-    s1.command(f"""echo --------------
-
-echo "Start - time: $(date)"
-df -kh
+    s1.command(f"""
+mkdir -p /io/wd/
+cd /io/wd/
 
 # create symlinks to make the filenames shorter, so the merge command doesn't get too long 
 for p in {for_loop_bam_list};
 do
-    ln -s "${{p}}" $(basename "${{p}}" | sed "s/ /_/g" |  sed "s/:/_/g")
+   	mv "${{p}}" $(basename "${{p}}" | sed "s/ /_/g" |  sed "s/:/_/g")
 done
-
-ls -lh
 
 # run the merge command
 java -jar /gatk/gatk.jar MergeSamFiles --VALIDATION_STRINGENCY SILENT --ASSUME_SORTED --CREATE_INDEX \
-    {picard_merge_bam_inputs} \
-    -O {combined_bamout_id}.bam
-
-ls
-
-echo --------------; free -h; df -kh; uptime; set +xe; echo "Done - time: $(date)"; echo --------------
+    {picard_merge_bam_inputs} -O {combined_bamout_id}.bam
 
 """)
-    s1.output(f"{combined_bamout_id}.bam")
-    s1.output(f"{combined_bamout_id}.bai")
+
+    s1.output(f"/io/wd/{combined_bamout_id}.bam")
+    s1.output(f"/io/wd/{combined_bamout_id}.bai")
     return 0
 
 
@@ -287,7 +282,7 @@ def main():
     with open(cache_filename, "rt") as f:
         input_bam_and_db_size_dict = json.load(f)
 
-    print(f"Read {len(input_bam_and_db_size_dict)} input bam/db paths from cache file: {cache_filename}")
+    print(f"Read {len(input_bam_and_db_size_dict):,d} input bam/db paths from cache file: {cache_filename}")
     all_sample_ids = {
         re.sub(".deidentified(.bam|.db|.bam.bai)$", "", os.path.basename(p)) for p in input_bam_and_db_size_dict.keys()
     }

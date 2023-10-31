@@ -23,7 +23,7 @@ EXCLUDE_INTERVALS = "gs://gnomad-readviz/v4.0/exclude_intervals_with_non_ACGT_ba
 # Amount of padding to add around each variant when running HaplotypeCaller.
 PADDING_AROUND_VARIANT = 200
 
-DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:aaad6b9f76badabe41b2f74e7445fe9cd7b61b41770d7a7c1b8e360e0f97b66a"
+DOCKER_IMAGE = "weisburd/gnomad-readviz@sha256:2b8c932cb8868ba9590f0a6183bcda4d29bd3b8e9e818ad9b3f2b9c4caa8d8bc"
 
 HG38_FASTA_PATH = "gs://gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta"
 HG38_FASTA_INDEX_PATH = "gs://gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta.fai"
